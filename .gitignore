@@ -30,6 +30,7 @@ env/
 /debug_audio/
 clean_*.wav
 temp_*.wav
+*.wav
 conversation_with_speakers.json
 
 # --- Jupyter Notebook ---
