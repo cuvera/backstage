@@ -1,0 +1,10 @@
+pyannote.audio
+faster-whisper
+qdrant-client
+torch
+torchaudio
+python-dotenv
+pydub
+noisereduce
+soundfile
+speechbrain
