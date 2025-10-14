@@ -1,3 +1,4 @@
+
 # VoxScribe: Multi-speaker Transcription and Identification
 
 This project provides a complete Python pipeline for processing multi-speaker audio. It performs transcription, speaker diarization, and speaker identification against a database of enrolled voices to produce a final, name-tagged transcript.
