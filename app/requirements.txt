@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+pydantic-core
+motor
+pymongo
+aio-pika
+python-dotenv
+apscheduler
+google-generativeai
