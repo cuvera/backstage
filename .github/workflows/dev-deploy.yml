@@ -144,7 +144,7 @@ jobs:
           pip install -r requirements.txt
           
           # Verify uvicorn installation
-          python -m uvicorn --version || pip install uvicorn
+          python -m uvicorn --version || python -m pip install uvicorn
           
           # Check PM2 status before stopping
           pm2 list
