@@ -9,3 +9,4 @@ aio-pika
 python-dotenv
 apscheduler
 google-generativeai
+openai
