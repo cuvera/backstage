@@ -121,14 +121,14 @@ jobs:
           SERVICE_NAME=$(echo "$SERVICE_NAME" | tr -d '\r\n' | xargs)
 
           # Create deployment directory
-          ssh "${VM_USER}@${VM_HOST}" "mkdir -p '/home/cuvera/${SERVICE_NAME}' && echo 'Directory created: /home/cuvera/${SERVICE_NAME}' && ls -la /home/cuvera/"
+          ssh "${VM_USER}@${VM_HOST}" "mkdir -p '/home/${VM_USER}/${SERVICE_NAME}' && echo 'Directory created: /home/${VM_USER}/${SERVICE_NAME}' && ls -la /home/${VM_USER}/"
           
           # Upload files
-          scp -r . "${VM_USER}@${VM_HOST}:/home/cuvera/${SERVICE_NAME}/"
+          scp -r . "${VM_USER}@${VM_HOST}:/home/${VM_USER}/${SERVICE_NAME}/"
           
           # Deploy and restart service
           ssh "${VM_USER}@${VM_HOST}" << ENDSSH
-          cd "/home/cuvera/${SERVICE_NAME}"
+          cd "/home/${VM_USER}/${SERVICE_NAME}"
           
           # Verify we're in the right directory and files exist
           echo "Current directory: \$(pwd)"
