@@ -4,19 +4,15 @@ from typing import Optional
 import logging
 
 class Settings(BaseSettings):
-    SERVICE_NAME: str = Field(default="cognitive-service", env="SERVICE_NAME")
-    PROJECT_NAME: str = Field(default="Cognitive Service", env="PROJECT_NAME")
+    SERVICE_NAME: str = Field(default="backstage", env="SERVICE_NAME")
+    PROJECT_NAME: str = Field(default="backstage", env="PROJECT_NAME")
     VERSION: str = Field(default="1.0.0", env="VERSION")
     DEBUG: bool = Field(default=False, env="DEBUG")
     
     MONGODB_URL: str = Field(default="mongodb://localhost:27017", env="MONGODB_URL")
     DATABASE_NAME: str = Field(default="intelligence_db", env="DATABASE_NAME")
     
-    QDRANT_HOST: str = Field(default="localhost", env="QDRANT_HOST")
-    QDRANT_PORT: int = Field(default=6333, env="QDRANT_PORT")
-    QDRANT_API_KEY: Optional[str] = Field(default=None, env="QDRANT_API_KEY")
-    QDRANT_COLLECTION_NAME: str = Field(default="voiceprints-v1.1", env="QDRANT_COLLECTION_NAME")
-    VECTOR_DIMENSION: int = Field(default=256, env="VECTOR_DIMENSION")
+
     
     DEFAULT_LLM_PROVIDER: str = Field(default="gemini", env="DEFAULT_LLM_PROVIDER")
     DEFAULT_LLM_MODEL: str = Field(default="gemini-2.5-flash", env="DEFAULT_LLM_MODEL")
@@ -56,11 +52,8 @@ class Settings(BaseSettings):
 
     ENABLE_TRANSCRIPTION_CONSUMER: bool = Field(default=True, env="ENABLE_TRANSCRIPTION_CONSUMER")
 
-    QDRANT_COLLECTION_NAME_RAG: str = Field(env="QDRANT_COLLECTION_NAME_RAG")
-    QDRANT_API_KEY_RAG: str = Field(env="QDRANT_API_KEY_RAG")
-    QDRANT_URL_RAG: str = Field(env="QDRANT_URL_RAG")
 
-    CHATBOT_NAME: str = Field(env="CHATBOT_NAME")
+
     CUVERA_CORE_SERVICE: str =Field(env="CUVERA_CORE_SERVICE")
     
     AUTH_SERVICE_URL: str = Field(env="AUTH_SERVICE_URL")
