@@ -60,6 +60,9 @@ class Settings(BaseSettings):
 
     RABBITMQ_PAINPOINT_CAPTURED_QUEUE: str = Field(env="painpoint.captured.q",)
 
+    # Scheduler configuration
+    PAINPOINT_CRON_EXPRESSION: str = Field(default="0 * * * *", env="PAINPOINT_CRON_EXPRESSION")
+
     class Config:
         env_file = ".env"
         case_sensitive = True
