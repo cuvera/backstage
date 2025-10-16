@@ -135,8 +135,9 @@ jobs:
           echo "Files in directory:"
           ls -la
           
-          # Create and activate virtual environment
-          python3 -m venv .venv
+          # Remove existing venv and create fresh virtual environment
+          rm -rf .venv
+          python3 -m venv .venv --copies
           source .venv/bin/activate
           
           # Install production dependencies in venv
