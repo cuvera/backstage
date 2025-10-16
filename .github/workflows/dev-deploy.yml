@@ -1,0 +1,173 @@
+name: Dev Build and Deploy
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [dev]
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment: dev
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          
+      # - name: Install dependencies
+      #   run: |
+      #     python -m pip install --upgrade pip
+      #     pip install -r requirements.txt
+          
+      # - name: Build application
+      #   run: |
+      #     # Add any build steps if needed
+      #     echo "Build completed"
+        
+      # - name: Prepare artifacts
+      #   run: |
+      #     echo "Files in current directory:"
+      #     ls -la
+          
+      - name: Archive artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dev-build-${{ github.sha }}
+          path: |
+            .
+            !.git
+            !.github
+            !__pycache__
+            !*.pyc
+            !.pytest_cache
+          retention-days: 3
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: dev
+    if: github.ref == 'refs/heads/dev'
+    
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dev-build-${{ github.sha }}
+          
+      - name: Restore and verify files
+        run: |
+          echo "Files after download:"
+          ls -la
+          
+      - name: Parse deployment variables
+        id: deploy_vars
+        run: |
+          # Extract individual variables
+          echo "VM_HOST=${{ vars.VM_HOST }}" >> $GITHUB_OUTPUT
+          echo "VM_USER=${{ vars.VM_USER }}" >> $GITHUB_OUTPUT
+          echo "VM_PORT=${{ vars.VM_PORT }}" >> $GITHUB_OUTPUT
+          
+          # Extract SERVICE_NAME from DEV_ENV
+          SERVICE_NAME=$(echo "${{ vars.DEV_ENV }}" | sed 's/\\r\\n/\n/g' | grep "^SERVICE_NAME=" | cut -d'=' -f2 | tr -d '\r\n' | xargs)
+          echo "SERVICE_NAME=${SERVICE_NAME}" >> $GITHUB_OUTPUT
+          
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+          
+      - name: Add host to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ steps.deploy_vars.outputs.VM_HOST }} >> ~/.ssh/known_hosts
+          
+      - name: Deploy to dev server
+        env:
+          SECRETS_CONTEXT: ${{ toJson(secrets) }}
+          VARS_CONTEXT: ${{ toJson(vars) }}
+        run: |         
+          # Dump all secrets to .env (excluding sensitive keys)
+          echo "$SECRETS_CONTEXT" | jq -r 'to_entries[] | select(.key != "SSH_PRIVATE_KEY" and .key != "github_token" and .key != "NPMRC_CONTENT" and .key != "AZURE_DEVOPS_TOKEN") | "\(.key)=\(.value)"' >> .env
+          
+          # Process DEV_ENV variable (handle \r\n properly)
+          # Exclude VM_HOST and VM_USER from $VARS_CONTEXT
+          echo "$VARS_CONTEXT" | jq -r '.DEV_ENV // ""' | sed 's/\\r\\n/\n/g' | grep -v '^#' | grep -v '^$' | while IFS='=' read -r key value; do
+            if [ -n "$key" ] && [ -n "$value" ]; then
+              echo "${key}=${value}" >> .env
+            fi
+          done
+          
+          # Add other variables except DEV_ENV
+          echo "$VARS_CONTEXT" | jq -r 'to_entries[] | select(.key != "DEV_ENV" and .key != "VM_HOST" and .key != "VM_USER" and .key != "VM_PORT") | "\(.key)=\(.value)"' >> .env
+
+          VM_USER="${{ steps.deploy_vars.outputs.VM_USER }}"
+          VM_HOST="${{ steps.deploy_vars.outputs.VM_HOST }}"
+          VM_PORT="${{ steps.deploy_vars.outputs.VM_PORT }}"
+          SERVICE_NAME="${{ steps.deploy_vars.outputs.SERVICE_NAME }}"
+
+          # Clean variables to remove carriage returns and whitespace
+          VM_USER=$(echo "$VM_USER" | tr -d '\r\n' | xargs)
+          VM_HOST=$(echo "$VM_HOST" | tr -d '\r\n' | xargs)
+          VM_PORT=$(echo "$VM_PORT" | tr -d '\r\n' | xargs)
+          SERVICE_NAME=$(echo "$SERVICE_NAME" | tr -d '\r\n' | xargs)
+
+          # Create deployment directory
+          ssh "${VM_USER}@${VM_HOST}" "mkdir -p '/home/cuvera/${SERVICE_NAME}' && echo 'Directory created: /home/cuvera/${SERVICE_NAME}' && ls -la /home/cuvera/"
+          
+          # Upload files
+          scp -r . "${VM_USER}@${VM_HOST}:/home/cuvera/${SERVICE_NAME}/"
+          
+          # Deploy and restart service
+          ssh "${VM_USER}@${VM_HOST}" << ENDSSH
+          cd "/home/cuvera/${SERVICE_NAME}"
+          
+          # Verify we're in the right directory and files exist
+          echo "Current directory: \$(pwd)"
+          echo "Files in directory:"
+          ls -la
+          
+          # Create and activate virtual environment
+          python3 -m venv .venv
+          source .venv/bin/activate
+          
+          # Install production dependencies in venv
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          
+          # Verify uvicorn installation
+          python -m uvicorn --version || pip install uvicorn
+          
+          # Check PM2 status before stopping
+          pm2 list
+          
+          # Stop and delete existing PM2 process
+          pm2 stop "${SERVICE_NAME}" || true
+          pm2 delete "${SERVICE_NAME}" || true
+          
+          # Start uvicorn with PM2, using venv python
+          pm2 start ".venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port ${VM_PORT}" --name "${SERVICE_NAME}" --update-env
+          pm2 save
+          ENDSSH
+          
+      - name: Health check
+        run: |
+          sleep 15
+          VM_HOST="${{ steps.deploy_vars.outputs.VM_HOST }}"
+          SERVICE_NAME="${{ steps.deploy_vars.outputs.SERVICE_NAME }}"
+          
+          # Clean variables to remove carriage returns and whitespace
+          VM_HOST=$(echo "$VM_HOST" | tr -d '\r\n' | xargs)
+          SERVICE_NAME=$(echo "$SERVICE_NAME" | tr -d '\r\n' | xargs)
+          
+          HEALTH_URL="http://${VM_HOST}/${SERVICE_NAME}/health"
+          echo "Health check URL: $HEALTH_URL"
+          curl -f "$HEALTH_URL" || exit 1
