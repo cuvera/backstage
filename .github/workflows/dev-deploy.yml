@@ -154,7 +154,7 @@ jobs:
           pm2 delete "${SERVICE_NAME}" || true
           
           # Start uvicorn with PM2, using venv python
-          pm2 start ".venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port ${VM_PORT}" --name "${SERVICE_NAME}" --update-env
+          pm2 start ".venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port ${VM_PORT}" --name "${SERVICE_NAME}" --update-env
           pm2 save
           ENDSSH
           
