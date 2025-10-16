@@ -10,3 +10,7 @@ python-dotenv
 apscheduler
 google-generativeai
 openai
+boto3
+aiofiles
+pydub
+soundfile
