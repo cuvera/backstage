@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 
 from app.api.v1.router import api_router
 from app.core.config import settings
@@ -32,16 +33,16 @@ async def lifespan(_: FastAPI):
         await consumer_manager.start()
         global scheduler
         scheduler = AsyncIOScheduler(timezone="UTC")
+        cron_expression = settings.PAINPOINT_CRON_EXPRESSION
+        trigger = CronTrigger.from_crontab(cron_expression, timezone="UTC")
         scheduler.add_job(
             run_daily_department_painpoints_job,
-            trigger="cron",
-            hour=0,
-            minute=0,
+            trigger=trigger,
             id="daily_department_painpoints",
             replace_existing=True,
         )
         scheduler.start()
-        logger.info("Scheduled pain point aggregation job for 00:00 UTC daily")
+        logger.info("Scheduled pain point aggregation job with cron '%s'", cron_expression)
     except Exception as exc:
         logger.error("Error during startup: %s", exc, exc_info=True)
         raise
