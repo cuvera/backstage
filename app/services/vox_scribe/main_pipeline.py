@@ -18,25 +18,6 @@ def main():
         td_service = TranscriptionDiarizationService()
         assignment_service = SpeakerAssignmentService(qdrant_service)
         
-        print("\n--- Onboarding Known Speakers ---")
-        qdrant_service.recreate_collection()
-        
-        enrollment_map = {
-            "Guru": "audio_guru_10.wav",
-            "Aniverthy": "audio_aniverthy_10.wav",
-            "Gulshan": "audio_gulshan_11.wav",
-            "Tapan": "audio_tapan_10.wav"
-        }
-        
-        for name, raw_path in enrollment_map.items():
-            if not os.path.exists(raw_path): raise FileNotFoundError(f"Missing enrollment file: {raw_path}")
-            clean_path = f"clean_{os.path.basename(raw_path)}"
-            created_files.append(clean_path)
-            preprocessor.process(input_path=raw_path, output_path=clean_path)
-            qdrant_service.upsert(audio_path=clean_path, speaker_name=name)
-        
-        print("\n✅ All known speakers have been onboarded.")
-
         print("\n--- Processing Meeting Audio ---")
         meeting_audio_path = "audio_meeting_test_1.wav"
         if not os.path.exists(meeting_audio_path): raise FileNotFoundError(f"Missing meeting file: {meeting_audio_path}")
