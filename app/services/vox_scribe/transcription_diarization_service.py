@@ -12,7 +12,7 @@ class TranscriptionDiarizationService:
     """Handles transcription and speaker diarization."""
 
     def __init__(self):
-        self.HF_TOKEN = os.getenv("HUGGINGFACE_TOKEN")
+        self.HF_TOKEN = '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'
         self.WHISPER_MODEL_NAME = os.getenv("WHISPER_MODEL_NAME", "base")
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print(f"Using device: {self.device}")
@@ -25,7 +25,7 @@ class TranscriptionDiarizationService:
             self.diarization_pipeline = Pipeline.from_pretrained(
                 "pyannote/speaker-diarization-community-1",
                 # "pyannote/speaker-diarization-3.1",
-                token=self.HF_TOKEN
+                token='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'
             ).to(self.device)
             print("✅ Transcription and Diarization models loaded.")
         except Exception as e:

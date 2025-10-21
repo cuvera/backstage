@@ -52,13 +52,17 @@ class Settings(BaseSettings):
 
     ENABLE_TRANSCRIPTION_CONSUMER: bool = Field(default=True, env="ENABLE_TRANSCRIPTION_CONSUMER")
 
-
+    # QDRANT Configuration for VoxScribe
+    QDRANT_URL: Optional[str] = Field(default=None, env="QDRANT_URL")
+    QDRANT_COLLECTION_NAME: Optional[str] = Field(default=None, env="QDRANT_COLLECTION_NAME")
+    QDRANT_API_KEY: Optional[str] = Field(default=None, env="QDRANT_API_KEY")
 
     CUVERA_CORE_SERVICE: str =Field(env="CUVERA_CORE_SERVICE")
     
     AUTH_SERVICE_URL: str = Field(env="AUTH_SERVICE_URL")
 
     RABBITMQ_PAINPOINT_CAPTURED_QUEUE: str = Field(env="painpoint.captured.q",)
+    RABBITMQ_MEETING_PROCESSING_QUEUE: str = Field(default="meeting.processing.q", env="RABBITMQ_MEETING_PROCESSING_QUEUE")
 
     # Scheduler configuration
     PAINPOINT_CRON_EXPRESSION: str = Field(default="0 * * * *", env="PAINPOINT_CRON_EXPRESSION")

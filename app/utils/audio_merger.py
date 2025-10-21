@@ -7,7 +7,8 @@ from pathlib import Path
 
 import boto3
 from botocore.exceptions import ClientError, NoCredentialsError
-from pydub import AudioSegment
+import audiofile
+import numpy as np
 import aiofiles
 
 from app.core.config import settings
@@ -81,7 +82,8 @@ async def merge_wav_files_from_s3(
             file_size = os.path.getsize(file_path)
 
             # Calculate metadata
-            duration_seconds = len(AudioSegment.from_wav(file_path)) / 1000.0
+            signal, sampling_rate = audiofile.read(file_path)
+            duration_seconds = len(signal) / sampling_rate
 
             result = {
                 "file": file_path,
@@ -120,22 +122,23 @@ async def merge_wav_files_from_s3(
             logger.info("All files downloaded successfully")
             
             # Validate and merge audio files
-            merged_audio = await merge_local_audio_files(local_files)
+            merged_audio, sample_rate = await merge_local_audio_files(local_files)
             
             # Export merged audio to temporary file
             merged_file_path = os.path.join(temp_dir, "merged_output.wav")
-            merged_audio.export(merged_file_path, format="wav")
+            audiofile.write(merged_file_path, merged_audio, sample_rate)
         
             logger.info(f"Merged audio exported to: {merged_file_path}")
         
             # Upload merged file to S3
-            upload_success = await upload_to_s3(merged_file_path, output_s3_key, bucket)
-            if not upload_success:
-                raise AudioMergerError(f"Failed to upload merged file to s3://{bucket}/{output_s3_key}")
+            if output_s3_key:
+                upload_success = await upload_to_s3(merged_file_path, output_s3_key, bucket)
+                if not upload_success:
+                    raise AudioMergerError(f"Failed to upload merged file to s3://{bucket}/{output_s3_key}")
         
             # Calculate metadata
             file_size = os.path.getsize(merged_file_path)
-            duration_seconds = len(merged_audio) / 1000.0  # pydub uses milliseconds
+            duration_seconds = len(merged_audio) / sample_rate
         
             result = {
                 "local_merged_file_path": merged_file_path,
@@ -286,22 +289,23 @@ async def upload_to_s3(
         return False
 
 
-async def merge_local_audio_files(file_paths: List[str]) -> AudioSegment:
+async def merge_local_audio_files(file_paths: List[str]) -> tuple[np.ndarray, int]:
     """
-    Merge multiple local audio files into a single AudioSegment.
+    Merge multiple local audio files into a single audio array.
     
     Args:
         file_paths: List of local audio file paths
     
     Returns:
-        Merged AudioSegment
+        Tuple of (merged_audio_data, sample_rate)
     """
     if not file_paths:
-        raise AudioMergerError("No files provided for merging")
+        logger.info("No files provided for merging")
     
     logger.info(f"Merging {len(file_paths)} audio files")
     
     merged_audio = None
+    sample_rate = None
     
     for i, file_path in enumerate(file_paths):
         try:
@@ -310,29 +314,37 @@ async def merge_local_audio_files(file_paths: List[str]) -> AudioSegment:
                 raise AudioMergerError(f"File not found: {file_path}")
             
             # Load audio file
-            audio = AudioSegment.from_wav(file_path)
+            signal, sr = audiofile.read(file_path)
             
-            # Normalize audio properties (convert to mono, keep original sample rate)
-            audio = audio.set_channels(1)  # Convert to mono
+            # Convert to mono if stereo
+            if signal.ndim > 1:
+                signal = np.mean(signal, axis=1)
+            
+            # Set sample rate from first file
+            if sample_rate is None:
+                sample_rate = sr
+            elif sr != sample_rate:
+                # Resample if needed (basic implementation)
+                logger.warning(f"Sample rate mismatch: {sr} vs {sample_rate}. Using first file's rate.")
             
             logger.debug(f"Loaded audio file {i+1}/{len(file_paths)}: {file_path} "
-                        f"(duration: {len(audio)/1000:.2f}s)")
+                        f"(duration: {len(signal)/sr:.2f}s)")
             
             # Merge with previous audio
             if merged_audio is None:
-                merged_audio = audio
+                merged_audio = signal
             else:
-                merged_audio += audio
+                merged_audio = np.concatenate([merged_audio, signal])
                 
         except Exception as e:
             logger.error(f"Failed to process audio file {file_path}: {e}")
             raise AudioMergerError(f"Failed to process audio file {file_path}: {str(e)}") from e
     
     if merged_audio is None:
-        raise AudioMergerError("No audio content was merged")
+        logger.info("No audio content was merged")
     
-    logger.info(f"Successfully merged audio (total duration: {len(merged_audio)/1000:.2f}s)")
-    return merged_audio
+    logger.info(f"Successfully merged audio (total duration: {len(merged_audio)/sample_rate:.2f}s)")
+    return merged_audio, sample_rate
 
 
 def _get_s3_client():
