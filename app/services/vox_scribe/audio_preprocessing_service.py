@@ -4,9 +4,82 @@ import os
 import numpy as np
 import soundfile as sf
 import noisereduce as nr
-from pydub import AudioSegment
+import audiofile
 import torch
 import torchaudio
+from scipy import signal
+
+
+class AudioData:
+    """A replacement for AudioSegment using numpy arrays."""
+    
+    def __init__(self, data: np.ndarray, sample_rate: int, channels: int = 1, sample_width: int = 2):
+        self.data = data
+        self.sample_rate = sample_rate
+        self.channels = channels
+        self.sample_width = sample_width
+        
+    @classmethod
+    def from_file(cls, file_path: str):
+        """Load audio from file."""
+        data, sample_rate = audiofile.read(file_path)
+        if data.ndim > 1:
+            channels = data.shape[1]
+        else:
+            channels = 1
+        return cls(data, sample_rate, channels)
+    
+    def set_channels(self, channels: int):
+        """Convert to specified number of channels."""
+        if channels == 1 and self.data.ndim > 1:
+            # Convert to mono
+            self.data = np.mean(self.data, axis=1)
+            self.channels = 1
+        return self
+    
+    def export(self, output_path: str, format: str = "wav"):
+        """Export audio to file."""
+        audiofile.write(output_path, self.data, self.sample_rate)
+    
+    def get_array_of_samples(self):
+        """Return array of samples."""
+        return (self.data * 32767).astype(np.int16)
+    
+    @property
+    def frame_rate(self):
+        """Return sample rate."""
+        return self.sample_rate
+    
+    @property
+    def dBFS(self):
+        """Calculate dBFS level."""
+        rms = np.sqrt(np.mean(self.data ** 2))
+        if rms == 0:
+            return -np.inf
+        return 20 * np.log10(rms)
+    
+    def apply_gain(self, gain_db: float):
+        """Apply gain in dB."""
+        gain_linear = 10 ** (gain_db / 20)
+        self.data = self.data * gain_linear
+        return self
+    
+    def high_pass_filter(self, cutoff_hz: int):
+        """Apply high-pass filter."""
+        nyquist = self.sample_rate / 2
+        normal_cutoff = cutoff_hz / nyquist
+        b, a = signal.butter(5, normal_cutoff, btype='high', analog=False)
+        self.data = signal.filtfilt(b, a, self.data)
+        return self
+    
+    def low_pass_filter(self, cutoff_hz: int):
+        """Apply low-pass filter."""
+        nyquist = self.sample_rate / 2
+        normal_cutoff = cutoff_hz / nyquist
+        b, a = signal.butter(5, normal_cutoff, btype='low', analog=False)
+        self.data = signal.filtfilt(b, a, self.data)
+        return self
+
 
 class AudioPreprocessor:
     """A service to clean and standardize audio files for voice processing."""
@@ -20,7 +93,7 @@ class AudioPreprocessor:
         self.high_pass_hz = high_pass_hz
         print("AudioPreprocessor initialized.")
 
-    def _apply_band_pass_filter(self, sound: AudioSegment) -> AudioSegment:
+    def _apply_band_pass_filter(self, sound: AudioData) -> AudioData:
         """Applies a high-pass and low-pass filter to the audio."""
         print("  - Applying band-pass filter...")
         sound = sound.high_pass_filter(self.high_pass_hz)
@@ -28,7 +101,7 @@ class AudioPreprocessor:
         return sound
 
     # --- THIS IS THE UPDATED METHOD ---
-    def _apply_noise_reduction(self, sound: AudioSegment) -> AudioSegment:
+    def _apply_noise_reduction(self, sound: AudioData) -> AudioData:
         """Reduces background noise using a noise profile from the start of the audio."""
         print("  - Applying targeted noise reduction...")
         
@@ -58,14 +131,11 @@ class AudioPreprocessor:
         # Convert back to original integer type
         reduced_noise_int = (reduced_noise_float * max_val).astype(samples.dtype)
 
-        return AudioSegment(
-            reduced_noise_int.tobytes(),
-            frame_rate=sample_rate,
-            sample_width=sound.sample_width,
-            channels=sound.channels
-        )
+        # Convert back to float and update the AudioData object
+        sound.data = reduced_noise_float
+        return sound
 
-    def _apply_loudness_normalization(self, sound: AudioSegment) -> AudioSegment:
+    def _apply_loudness_normalization(self, sound: AudioData) -> AudioData:
         """Normalizes the audio to a target LUFS level."""
         print("  - Applying loudness normalization...")
         change_in_lufs = self.target_lufs - sound.dBFS
@@ -81,7 +151,7 @@ class AudioPreprocessor:
 
         print(f"\nProcessing audio file: {input_path}")
         try:
-            sound = AudioSegment.from_file(input_path)
+            sound = AudioData.from_file(input_path)
             sound = sound.set_channels(1) # Ensure mono channel
 
             # Pipeline Order: Filter -> Noise Reduce -> Normalize
