@@ -62,7 +62,7 @@ class Settings(BaseSettings):
     AUTH_SERVICE_URL: str = Field(env="AUTH_SERVICE_URL")
 
     RABBITMQ_PAINPOINT_CAPTURED_QUEUE: str = Field(env="painpoint.captured.q",)
-    RABBITMQ_MEETING_PROCESSING_QUEUE: str = Field(default="meeting.processing.q", env="RABBITMQ_MEETING_PROCESSING_QUEUE")
+    RABBITMQ_MEETING_PROCESSING_QUEUE: str = Field(default="cognitive.meeting.completed", env="RABBITMQ_MEETING_PROCESSING_QUEUE")
 
     # Scheduler configuration
     PAINPOINT_CRON_EXPRESSION: str = Field(default="0 * * * *", env="PAINPOINT_CRON_EXPRESSION")

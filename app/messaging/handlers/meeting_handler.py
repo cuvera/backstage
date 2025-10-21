@@ -29,7 +29,6 @@ async def meeting_handler(message: AbstractIncomingMessage) -> None:
         try:
             message_body = message.body.decode('utf-8')
             event_data = json.loads(message_body)
-            print(f"Event data: {message_body}")
             logger.info(f"Parsed meeting event data: {event_data.get('metadata', {}).get('eventType', 'Unknown')}")
         except (UnicodeDecodeError, json.JSONDecodeError) as e:
             logger.error(f"Failed to parse message body: {e}")
