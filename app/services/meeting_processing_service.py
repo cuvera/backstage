@@ -70,30 +70,33 @@ class MeetingProcessingService:
             # Extract meeting details from payload
             meeting_id = str(payload.get('_id'))
             tenant_id = payload.get('tenantId')
-            file_url = payload.get('fileUrl')
             platform = payload.get('platform')
             bucket = payload.get('bucket', 'recordings')
             
-            if not all([meeting_id, tenant_id, file_url]):
+            if not all([meeting_id, tenant_id]):
                 raise MeetingProcessingServiceError("Missing required fields in payload: _id, tenantId, or fileUrl")
             
             # Step 1: Merge audio files from S3
             logger.info("Step 1: Merging audio files from S3")
-            s3_folder_path = f"{tenant_id}/{platform}/{meeting_id}/"
-            output_s3_key = f"{tenant_id}/{platform}/{meeting_id}/meeting.wav"
+            if not payload.get('fileUrl'):
+                s3_folder_path = f"{tenant_id}/{platform}/{meeting_id}/"
+                output_s3_key = f"{tenant_id}/{platform}/{meeting_id}/meeting.wav"
 
-            # output_s3_key
-            merge_result = await merge_wav_files_from_s3(
-                s3_folder_path=s3_folder_path,
-                output_s3_key=output_s3_key,
-                bucket_name=bucket
-            )
+                # output_s3_key
+                merge_result = await merge_wav_files_from_s3(
+                    s3_folder_path=s3_folder_path,
+                    output_s3_key=output_s3_key,
+                    bucket_name=bucket
+                )
+                file_url = merge_result['local_merged_file_path']
+            else:
+                file_url = payload.get('fileUrl')
             
             # Step 2: Process with vox_scribe pipeline
             logger.info("Step 2: Processing with vox_scribe pipeline")
-            logger.info(f"Step 2: {merge_result['local_merged_file_path']}")
+            logger.info(f"Step 2: {file_url}")
             vox_scribe_result = diarization_pipeline(
-                meeting_audio_path=merge_result['local_merged_file_path'],
+                meeting_audio_path=file_url,
                 known_number_of_speakers=0
             )
             logger.info(f"VoxScribe result: {vox_scribe_result}")
