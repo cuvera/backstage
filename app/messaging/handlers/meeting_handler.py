@@ -121,12 +121,7 @@ def _validate_message_structure(event_data: Dict[str, Any]) -> bool:
         if not all(field in payload for field in required_payload):
             logger.error(f"Missing required payload fields. Required: {required_payload}")
             return False
-        
-        # Check if we have either fileUrl or some audio reference
-        if not payload.get("fileUrl"):
-            logger.error("Missing fileUrl in payload")
-            return False
-        
+                
         return True
         
     except Exception as e:
