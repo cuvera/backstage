@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     AWS_ACCESS_KEY_ID: Optional[str] = Field(default=None, env="AWS_ACCESS_KEY_ID")
     AWS_SECRET_ACCESS_KEY: Optional[str] = Field(default=None, env="AWS_SECRET_ACCESS_KEY")
     AWS_REGION: str = Field(default="us-east-1", env="AWS_REGION")
-    S3_BUCKET_NAME: str = Field(default="cognitive-service-storage", env="AWS_BUCKET_NAME")
+    S3_BUCKET_NAME: str = Field(default="recordings", env="S3_BUCKET_NAME")
     AWS_ENDPOINT: Optional[str] = Field(default=None, env="AWS_ENDPOINT")
     
     RABBITMQ_URL: str = Field(env="RABBITMQ_URL")
