@@ -20,8 +20,10 @@ async def meeting_handler(message: AbstractIncomingMessage) -> None:
     This handler processes meeting recording events and triggers the complete
     processing pipeline including audio merging, transcription, and analysis.
     """
-    processing_service = None
-    
+    # processing_service = None
+    logger.info("Received meeting processing message")
+    await message.ack()
+    return
     try:
         logger.info("Received meeting processing message")
         
