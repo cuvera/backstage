@@ -23,6 +23,7 @@ from app.services.vox_scribe.quadrant_service import Quadrant_service
 from app.services.vox_scribe.transcription_diarization_service import TranscriptionDiarizationService
 from app.services.vox_scribe.speaker_assignment_service import SpeakerAssignmentService
 from app.services.vox_scribe.main_pipeline import diarization_pipeline
+from app.services.call_analysis_service import CallAnalysisService
 
 logger = logging.getLogger(__name__)
 
@@ -105,11 +106,34 @@ class MeetingProcessingService:
                 merge_result["diarization"] = vox_scribe_result
                 merge_result["success"] = True
                 merge_result["meeting_id"] = meeting_id
-                return merge_result
             else:
                 merge_result["success"] = False
                 merge_result["meeting_id"] = meeting_id
                 return merge_result
+            
+            logger.info(f"Step 3: Meeting analysis")
+            # Handle case where transcript_payload is a list (from vox_scribe pipeline)
+            if isinstance(vox_scribe_result, list):
+                # Convert list to expected dictionary format
+                conversation_list = vox_scribe_result
+                transcript_payload = {
+                    "conversation": conversation_list,
+                    "tenant_id": tenant_id,
+                    "session_id": meeting_id
+                }
+
+            # printtranscript_payload
+            analysis_result = self.analysis_agent.analyze(
+                transcript_payload=transcript_payload or {}
+            )
+
+            call_analysis_service = CallAnalysisService()
+            await call_analysis_service.save_analysis(analysis_result)
+
+            merge_result["analysis"] = analysis_result
+            merge_result["success"] = True
+            merge_result["meeting_id"] = meeting_id
+            return merge_result
 
         except Exception as e:
             logger.error(f"Meeting processing failed for meeting {payload.get('_id', 'unknown')}: {str(e)}")

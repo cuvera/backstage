@@ -52,6 +52,7 @@ class CallAnalysisAgent:
         context: Optional[Dict[str, Any]] = None,
     ) -> MeetingAnalysis:
         ctx = context or {}
+        
         tenant_id = (ctx.get("tenant_id") or transcript_payload.get("tenant_id") or "").strip()
         session_id = (ctx.get("session_id") or transcript_payload.get("session_id") or "").strip()
         if not tenant_id or not session_id:
