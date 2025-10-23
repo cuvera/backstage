@@ -20,10 +20,6 @@ async def meeting_handler(message: AbstractIncomingMessage) -> None:
     This handler processes meeting recording events and triggers the complete
     processing pipeline including audio merging, transcription, and analysis.
     """
-    # processing_service = None
-    logger.info("Received meeting processing message")
-    await message.ack()
-    return
     try:
         logger.info("Received meeting processing message")
         
@@ -55,7 +51,7 @@ async def meeting_handler(message: AbstractIncomingMessage) -> None:
                 await message.ack()
             else:
                 logger.error(f"Meeting processing failed: {result.get('error')}")
-                await message.reject(requeue=True)  # Requeue for retry
+                await message.reject(requeue=False)  # Requeue for retry
                 
         except MeetingAlreadyProcessedException as e:
             logger.info(f"Meeting already processed or being processed: {e}")
@@ -67,14 +63,14 @@ async def meeting_handler(message: AbstractIncomingMessage) -> None:
             # Check if this is a retryable error
             if _is_retryable_error(e):
                 logger.info("Error is retryable, requeuing message")
-                await message.reject(requeue=True)
+                await message.reject(requeue=False)
             else:
                 logger.info("Error is not retryable, rejecting message")
                 await message.reject(requeue=False)
                 
         except Exception as e:
             logger.error(f"Unexpected error in meeting processing: {e}", exc_info=True)
-            await message.reject(requeue=True)  # Requeue unexpected errors for retry
+            await message.reject(requeue=False)  # Requeue unexpected errors for retry
     
     except Exception as e:
         logger.error(f"Critical error in meeting handler: {e}", exc_info=True)
