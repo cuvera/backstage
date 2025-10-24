@@ -8,9 +8,9 @@ from dotenv import load_dotenv
 # --- NEW: Import the assignment algorithm from scipy ---
 from scipy.optimize import linear_sum_assignment
 
-from quadrant_service import Quadrant_service
-from audio_preprocessing_service import AudioPreprocessor
-from transcription_diarization_service import TranscriptionDiarizationService
+from app.services.vox_scribe.quadrant_service import Quadrant_service
+from app.services.vox_scribe.audio_preprocessing_service import AudioPreprocessor
+from app.services.vox_scribe.transcription_diarization_service import TranscriptionDiarizationService
 
 load_dotenv()
 

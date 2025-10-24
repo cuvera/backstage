@@ -3,8 +3,8 @@ import uuid
 from dotenv import load_dotenv
 
 # --- UPDATED: Import the pre-processing service for the test block ---
-from audio_preprocessing_service import AudioPreprocessor
-from embedding_service import Embedding_service
+from app.services.vox_scribe.audio_preprocessing_service import AudioPreprocessor
+from app.services.vox_scribe.embedding_service import Embedding_service
 from qdrant_client import QdrantClient, models
 
 load_dotenv()
