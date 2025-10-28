@@ -4,7 +4,6 @@ from typing import Optional
 import boto3
 from botocore.exceptions import NoCredentialsError
 from app.core.config import settings
-from app.utils.audio_merger import AudioMergerError
 
 logger = logging.getLogger(__name__)
 
@@ -30,9 +29,11 @@ def get_s3_client():
         return boto3.client('s3', **client_config)
         
     except NoCredentialsError:
-        raise AudioMergerError("AWS credentials not found. Please configure AWS credentials.")
+        logger.error("AWS credentials not found. Please configure AWS credentials.")
+        raise Exception("AWS credentials not found. Please configure AWS credentials.")
     except Exception as e:
-        raise AudioMergerError(f"Failed to create S3 client: {str(e)}") from e
+        logger.error(f"Failed to create S3 client: {str(e)}")
+        raise Exception(f"Failed to create S3 client: {str(e)}") from e
 
 async def download_s3_file(
     s3_key: str,
@@ -67,7 +68,7 @@ async def download_s3_file(
         
     except Exception as e:
         logger.error(f"Failed to download s3://{bucket}/{s3_key}: {e}")
-        return False
+        raise Exception(f"Failed to download s3://{bucket}/{s3_key}: {str(e)}") from e
 
 
 async def upload_to_s3(
@@ -105,4 +106,4 @@ async def upload_to_s3(
         
     except Exception as e:
         logger.error(f"Failed to upload to s3://{bucket}/{s3_key}: {e}")
-        return False
+        raise Exception(f"Failed to upload to s3://{bucket}/{s3_key}: {str(e)}") from e
