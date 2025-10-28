@@ -24,6 +24,7 @@ from app.services.vox_scribe.transcription_diarization_service import Transcript
 from app.services.vox_scribe.speaker_assignment_service import SpeakerAssignmentService
 from app.services.vox_scribe.main_pipeline import diarization_pipeline
 from app.services.call_analysis_service import CallAnalysisService
+from app.utils.s3_client import download_s3_file
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +92,10 @@ class MeetingProcessingService:
                 )
                 file_url = merge_result['local_merged_file_path']
             else:
-                file_url = payload.get('fileUrl')
+                # download file from s3
+                temp_dir = tempfile.mkdtemp(prefix="audio_merge_")
+                file_url = os.path.join(temp_dir, "merged_output.wav")
+                download_s3_file(payload.get('fileUrl'), file_url ,bucket)
             
             # Step 2: Process with vox_scribe pipeline
             logger.info("Step 2: Processing with vox_scribe pipeline")
