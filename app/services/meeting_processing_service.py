@@ -95,7 +95,12 @@ class MeetingProcessingService:
                 # download file from s3
                 temp_dir = tempfile.mkdtemp(prefix="audio_merge_")
                 file_url = os.path.join(temp_dir, "merged_output.wav")
-                download_s3_file(payload.get('fileUrl'), file_url ,bucket)
+                await download_s3_file(payload.get('fileUrl'), file_url ,bucket)
+                # Initialize merge_result for the downloaded file case
+                merge_result = {
+                    'local_merged_file_path': file_url,
+                    'temp_directory': temp_dir
+                }
             
             # Step 2: Process with vox_scribe pipeline
             logger.info("Step 2: Processing with vox_scribe pipeline")
