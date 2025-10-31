@@ -19,6 +19,52 @@ class ConfidenceLevel(str, Enum):
     high = "high"
 
 
+class OutcomeType(str, Enum):
+    decision = "decision"
+    approval = "approval"
+    alignment = "alignment"
+
+
+class SeverityLevel(str, Enum):
+    low = "low"
+    medium = "medium"
+    high = "high"
+
+
+class BlockingItemStatus(str, Enum):
+    open = "open"
+    mitigating = "mitigating"
+    cleared = "cleared"
+
+
+class ExpectedOutcome(BaseModel):
+    description: str = Field(..., min_length=1)
+    owner: str = Field(default="")
+    type: OutcomeType
+
+
+class BlockingItem(BaseModel):
+    title: str = Field(..., min_length=1)
+    owner: str = Field(default="")
+    eta: str = Field(default="")
+    impact: str = Field(default="")
+    severity: SeverityLevel = SeverityLevel.medium
+    status: BlockingItemStatus = BlockingItemStatus.open
+
+
+class DecisionQueueItem(BaseModel):
+    id: str = Field(..., min_length=1)
+    title: str = Field(..., min_length=1)
+    needs: List[str] = Field(default_factory=list)
+    owner: str = Field(default="")
+
+
+class PreviousMeetingReference(BaseModel):
+    meeting_id: str = Field(..., min_length=1)
+    analysis_id: str = Field(..., min_length=1)
+    datetime: str = Field(..., min_length=1)
+
+
 class Turn(BaseModel):
     start_time: float = Field(..., ge=0.0)
     end_time: float = Field(..., gt=0.0)
@@ -142,3 +188,23 @@ class MeetingAnalysis(BaseModel):
     transcript_language: Optional[str] = None
     duration_sec: Optional[float] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class MeetingPrepPack(BaseModel):
+    title: str = Field(..., min_length=1)
+    tenant_id: str = Field(..., min_length=1)
+    timezone: str = Field(default="")
+    locale: str = Field(default="en-US")
+    recurring_meeting_id: str = Field(..., min_length=1)
+    purpose: str = Field(default="")
+    confidence: ConfidenceLevel = ConfidenceLevel.medium
+    expected_outcomes: List[ExpectedOutcome] = Field(default_factory=list)
+    blocking_items: List[BlockingItem] = Field(default_factory=list)
+    decision_queue: List[DecisionQueueItem] = Field(default_factory=list)
+    key_points: List[str] = Field(default_factory=list)
+    open_questions: List[str] = Field(default_factory=list)
+    risks_issues: List[str] = Field(default_factory=list)
+    leadership_asks: List[str] = Field(default_factory=list)
+    previous_meetings_ref: List[PreviousMeetingReference] = Field(default_factory=list)
+    created_at: str = Field(..., min_length=1)
+    updated_at: str = Field(..., min_length=1)
