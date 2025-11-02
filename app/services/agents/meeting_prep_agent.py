@@ -46,36 +46,28 @@ class MeetingPrepAgent:
 
     def generate_prep_pack(
         self,
-        meeting_id: str,
+        meeting_metadata: Dict[str, Any],
+        previous_analyses: List[MeetingAnalysis],
+        recurring_meeting_id: str,
         *,
-        recurring_meeting_id: Optional[str] = None,
-        previous_meeting_counts: Optional[int] = None,
+        previous_meetings: Optional[List[Dict[str, Any]]] = None,
         context: Optional[Dict[str, Any]] = None,
     ) -> MeetingPrepPack:
         """
         Generate an executive prep pack for an upcoming meeting.
         
         Args:
-            meeting_id: ID of the upcoming meeting
-            recurring_meeting_id: Optional override for recurring meeting ID
-            previous_meeting_counts: Number of previous meetings to analyze
+            meeting_metadata: Meeting metadata dict
+            previous_analyses: List of previous meeting analyses
+            recurring_meeting_id: Recurring meeting identifier
+            previous_meetings: Optional list of previous meeting data for references
             context: Additional context for processing
             
         Returns:
             MeetingPrepPack with synthesized insights and recommendations
         """
         ctx = context or {}
-        counts = previous_meeting_counts or self.previous_meeting_counts
-        
-        # Resolve recurring meeting ID
-        resolved_recurring_id = self._resolve_recurring_meeting_id(meeting_id, recurring_meeting_id)
-        
-        # Fetch meeting metadata
-        meeting_metadata = self._get_meeting_metadata(meeting_id)
-        
-        # Fetch previous meetings and their analyses
-        previous_meetings = self._get_previous_meetings(resolved_recurring_id, counts)
-        previous_analyses = self._get_meeting_analyses(previous_meetings)
+        prev_meetings = previous_meetings or []
         
         # Generate prep pack using LLM
         prompt = self._build_prompt(meeting_metadata, previous_analyses, ctx)
@@ -86,96 +78,13 @@ class MeetingPrepAgent:
         prep_pack = self._build_prep_pack(
             parsed_response=parsed_response,
             meeting_metadata=meeting_metadata,
-            recurring_meeting_id=resolved_recurring_id,
-            previous_meetings=previous_meetings,
+            recurring_meeting_id=recurring_meeting_id,
+            previous_meetings=prev_meetings,
             context=ctx,
         )
         
         return prep_pack
 
-    def _resolve_recurring_meeting_id(self, meeting_id: str, recurring_meeting_id: Optional[str] = None) -> str:
-        """Resolve recurring meeting ID from meeting details if not provided."""
-        if recurring_meeting_id:
-            return recurring_meeting_id
-        
-        meeting_details = self._get_meeting_metadata(meeting_id)
-        resolved_id = meeting_details.get("recurring_meeting_id")
-        
-        if not resolved_id:
-            raise MeetingPrepAgentError(f"No recurring_meeting_id found for meeting {meeting_id}")
-        
-        return resolved_id
-
-    def _get_meeting_metadata(self, meeting_id: str) -> Dict[str, Any]:
-        """
-        Fetch meeting metadata from database.
-        
-        This is a placeholder - replace with actual database query logic.
-        """
-        # TODO: Replace with actual database query
-        # Example structure:
-        return {
-            "id": meeting_id,
-            "title": "Weekly Team Sync",
-            "tenant_id": "example_tenant",
-            "recurring_meeting_id": "weekly_sync_001",
-            "timezone": "UTC",
-            "locale": "en-US",
-            "scheduled_datetime": "2025-10-31T15:00:00Z",
-            "attendees": ["user1@example.com", "user2@example.com"],
-        }
-
-    def _get_previous_meetings(self, recurring_meeting_id: str, count: int) -> List[Dict[str, Any]]:
-        """
-        Fetch previous meetings for the recurring meeting series.
-        
-        This is a placeholder - replace with actual database query logic.
-        """
-        # TODO: Replace with actual database query
-        # Query should fetch the most recent 'count' meetings with the same recurring_meeting_id
-        # Order by datetime DESC, exclude future meetings
-        return [
-            {
-                "id": f"meeting_{i}",
-                "recurring_meeting_id": recurring_meeting_id,
-                "datetime": f"2025-10-{24-i:02d}T15:00:00Z",
-                "session_id": f"session_{i}",
-            }
-            for i in range(1, count + 1)
-        ]
-
-    def _get_meeting_analyses(self, meetings: List[Dict[str, Any]]) -> List[MeetingAnalysis]:
-        """
-        Fetch meeting analyses for the given meetings.
-        
-        This is a placeholder - replace with actual database query logic.
-        """
-        # TODO: Replace with actual database query
-        # Query meeting_analysis table for analyses matching the session_ids
-        analyses = []
-        for meeting in meetings:
-            # This would be replaced with actual database query
-            analysis_data = {
-                "tenant_id": "example_tenant",
-                "session_id": meeting["session_id"],
-                "summary": f"Meeting summary for {meeting['id']}",
-                "key_points": ["Point 1", "Point 2"],
-                "decisions": [],
-                "action_items": [],
-                "risks_issues": [],
-                "open_questions": ["How to improve process?"],
-                "topics": ["Process improvement", "Team coordination"],
-                "confidence": "medium",
-                "created_at": meeting["datetime"],
-            }
-            try:
-                analysis = MeetingAnalysis(**analysis_data)
-                analyses.append(analysis)
-            except ValidationError as e:
-                logger.warning(f"Failed to parse analysis for meeting {meeting['id']}: {e}")
-                continue
-        
-        return analyses
 
     def _build_prompt(
         self,
