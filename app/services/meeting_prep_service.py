@@ -7,8 +7,9 @@ from typing import Any, Dict, List, Optional
 from motor.motor_asyncio import AsyncIOMotorCollection, AsyncIOMotorDatabase
 from pymongo import ASCENDING, DESCENDING
 
-from app.schemas.meeting_analysis import MeetingPrepPack
+from app.schemas.meeting_analysis import MeetingAnalysis, MeetingPrepPack
 from app.services.agents.meeting_prep_agent import MeetingPrepAgent, MeetingPrepAgentError
+from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +40,6 @@ class MeetingPrepService:
     @classmethod
     async def from_default(cls, collection_name: str = COLLECTION) -> "MeetingPrepService":
         from app.db.mongodb import get_database  # lazy import to avoid circular deps
-
-        
 
         db = await get_database()
         service = cls(db=db, collection_name=collection_name)
@@ -91,11 +90,25 @@ class MeetingPrepService:
             Dictionary with save result and prep pack data
         """
         try:
+            # Fetch meeting metadata
+            meeting_metadata = await self._get_meeting_metadata(meeting_id)
+            
+            # Resolve recurring meeting ID
+            resolved_recurring_id = self._resolve_recurring_meeting_id(
+                meeting_metadata, recurring_meeting_id
+            )
+            
+            # Fetch previous meetings and their analyses
+            counts = previous_meeting_counts or self._agent.previous_meeting_counts
+            previous_meetings = await self._get_previous_meetings(resolved_recurring_id, counts)
+            previous_analyses = await self._get_meeting_analyses(previous_meetings)
+            
             # Generate prep pack using agent
             prep_pack = self._agent.generate_prep_pack(
-                meeting_id=meeting_id,
-                recurring_meeting_id=recurring_meeting_id,
-                previous_meeting_counts=previous_meeting_counts,
+                meeting_metadata=meeting_metadata,
+                previous_analyses=previous_analyses,
+                recurring_meeting_id=resolved_recurring_id,
+                previous_meetings=previous_meetings,
                 context=context,
             )
             
@@ -109,7 +122,7 @@ class MeetingPrepService:
             )
             
             return {
-                "prep_pack": prep_pack.dict(),
+                "prep_pack": prep_pack.model_dump(),
                 "save_result": save_result,
             }
             
@@ -132,7 +145,7 @@ class MeetingPrepService:
             Dictionary with save operation details
         """
         now = datetime.now(timezone.utc).isoformat()
-        doc: Dict[str, Any] = prep_pack.dict(exclude_none=True)
+        doc: Dict[str, Any] = prep_pack.model_dump(exclude_none=True)
         doc.setdefault("created_at", now)
         doc["updated_at"] = now
         doc["meeting_id"] = meeting_id  # Store the meeting this prep pack is for
@@ -253,6 +266,92 @@ class MeetingPrepService:
             "deleted_count": result.deleted_count,
             "collection": self._collection_name,
         }
+
+    def _resolve_recurring_meeting_id(
+        self, meeting_metadata: Dict[str, Any], recurring_meeting_id: Optional[str] = None
+    ) -> str:
+        """Resolve recurring meeting ID from meeting details if not provided."""
+        if recurring_meeting_id:
+            return recurring_meeting_id
+        
+        resolved_id = meeting_metadata.get("recurring_meeting_id")
+        
+        if not resolved_id:
+            meeting_id = meeting_metadata.get("id", "unknown")
+            raise MeetingPrepServiceError(f"No recurring_meeting_id found for meeting {meeting_id}")
+        
+        return resolved_id
+
+    async def _get_meeting_metadata(self, meeting_id: str) -> Dict[str, Any]:
+        """
+        Fetch meeting metadata from database.
+        
+        This is a placeholder - replace with actual database query logic.
+        """
+        # TODO: Replace with actual database query
+        # Example structure:
+        return {
+            "id": meeting_id,
+            "title": "Weekly Team Sync",
+            "tenant_id": "example_tenant",
+            "recurring_meeting_id": "weekly_sync_001",
+            "timezone": "UTC",
+            "locale": "en-US",
+            "scheduled_datetime": "2025-10-31T15:00:00Z",
+            "attendees": ["user1@example.com", "user2@example.com"],
+        }
+
+    async def _get_previous_meetings(self, recurring_meeting_id: str, count: int) -> List[Dict[str, Any]]:
+        """
+        Fetch previous meetings for the recurring meeting series.
+        
+        This is a placeholder - replace with actual database query logic.
+        """
+        # TODO: Replace with actual database query
+        # Query should fetch the most recent 'count' meetings with the same recurring_meeting_id
+        # Order by datetime DESC, exclude future meetings
+        return [
+            {
+                "id": f"meeting_{i}",
+                "recurring_meeting_id": recurring_meeting_id,
+                "datetime": f"2025-10-{24-i:02d}T15:00:00Z",
+                "session_id": f"session_{i}",
+            }
+            for i in range(1, count + 1)
+        ]
+
+    async def _get_meeting_analyses(self, meetings: List[Dict[str, Any]]) -> List[MeetingAnalysis]:
+        """
+        Fetch meeting analyses for the given meetings.
+        
+        This is a placeholder - replace with actual database query logic.
+        """
+        # TODO: Replace with actual database query
+        # Query meeting_analysis table for analyses matching the session_ids
+        analyses = []
+        for meeting in meetings:
+            # This would be replaced with actual database query
+            analysis_data = {
+                "tenant_id": "example_tenant",
+                "session_id": meeting["session_id"],
+                "summary": f"Meeting summary for {meeting['id']}",
+                "key_points": ["Point 1", "Point 2"],
+                "decisions": [],
+                "action_items": [],
+                "risks_issues": [],
+                "open_questions": ["How to improve process?"],
+                "topics": ["Process improvement", "Team coordination"],
+                "confidence": "medium",
+                "created_at": meeting["datetime"],
+            }
+            try:
+                analysis = MeetingAnalysis(**analysis_data)
+                analyses.append(analysis)
+            except ValidationError as e:
+                logger.warning(f"Failed to parse analysis for meeting {meeting['id']}: {e}")
+                continue
+        
+        return analyses
 
     async def _ensure_collection(self) -> AsyncIOMotorCollection:
         """Ensure the MongoDB collection is available."""
