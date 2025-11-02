@@ -9,6 +9,12 @@ from pymongo import ASCENDING, DESCENDING
 
 from app.schemas.meeting_analysis import MeetingAnalysis, MeetingPrepPack
 from app.services.agents.meeting_prep_agent import MeetingPrepAgent, MeetingPrepAgentError
+from app.utils.meeting_metadata import (
+    fetch_meeting_metadata,
+    fetch_meetings_by_recurring_id,
+    extract_tenant_id,
+    extract_recurring_meeting_id,
+)
 from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
@@ -72,6 +78,7 @@ class MeetingPrepService:
     async def generate_and_save_prep_pack(
         self,
         meeting_id: str,
+        platform: str,
         *,
         recurring_meeting_id: Optional[str] = None,
         previous_meeting_counts: Optional[int] = None,
@@ -82,6 +89,7 @@ class MeetingPrepService:
         
         Args:
             meeting_id: ID of the upcoming meeting
+            platform: Meeting platform (e.g., 'google', 'zoom', 'offline')
             recurring_meeting_id: Optional override for recurring meeting ID
             previous_meeting_counts: Number of previous meetings to analyze
             context: Additional context for processing
@@ -90,17 +98,26 @@ class MeetingPrepService:
             Dictionary with save result and prep pack data
         """
         try:
-            # Fetch meeting metadata
-            meeting_metadata = await self._get_meeting_metadata(meeting_id)
+            # Only for online platforms (currently supporting Google's recurring meetings)
+            if platform != "google":
+                logger.warning("Meeting Prep Service is not implemented for platform=%s", platform)
+                return {
+                    "status": "skipped",
+                    "prep_pack": None,
+                    "save_result": None,
+                }
+
+            # Fetch meeting metadata based on platform
+            meeting_metadata = await self._get_meeting_metadata(meeting_id, platform)
             
             # Resolve recurring meeting ID
             resolved_recurring_id = self._resolve_recurring_meeting_id(
                 meeting_metadata, recurring_meeting_id
             )
             
-            # Fetch previous meetings and their analyses
+            # Fetch previous meetings and their analyses based on platform
             counts = previous_meeting_counts or self._agent.previous_meeting_counts
-            previous_meetings = await self._get_previous_meetings(resolved_recurring_id, counts)
+            previous_meetings = await self._get_previous_meetings(resolved_recurring_id, counts, platform)
             previous_analyses = await self._get_meeting_analyses(previous_meetings)
             
             # Generate prep pack using agent
@@ -274,51 +291,77 @@ class MeetingPrepService:
         if recurring_meeting_id:
             return recurring_meeting_id
         
-        resolved_id = meeting_metadata.get("recurring_meeting_id")
+        # Use utility function to extract recurring meeting ID
+        resolved_id = extract_recurring_meeting_id(meeting_metadata)
         
         if not resolved_id:
-            meeting_id = meeting_metadata.get("id", "unknown")
-            raise MeetingPrepServiceError(f"No recurring_meeting_id found for meeting {meeting_id}")
-        
+            logger.warning("No recurring_meeting_id found in meeting metadata")
+            return None
+
         return resolved_id
 
-    async def _get_meeting_metadata(self, meeting_id: str) -> Dict[str, Any]:
+    async def _get_meeting_metadata(self, meeting_id: str, platform: str) -> Dict[str, Any]:
         """
-        Fetch meeting metadata from database.
+        Fetch meeting metadata from external API or return placeholder for offline/unsupported platforms.
         
-        This is a placeholder - replace with actual database query logic.
+        Args:
+            meeting_id: Individual meeting identifier
+            platform: Meeting platform (e.g., 'google', 'zoom', 'offline')
+            
+        Returns:
+            Meeting metadata dictionary
         """
-        # TODO: Replace with actual database query
-        # Example structure:
-        return {
-            "id": meeting_id,
-            "title": "Weekly Team Sync",
-            "tenant_id": "example_tenant",
-            "recurring_meeting_id": "weekly_sync_001",
-            "timezone": "UTC",
-            "locale": "en-US",
-            "scheduled_datetime": "2025-10-31T15:00:00Z",
-            "attendees": ["user1@example.com", "user2@example.com"],
-        }
+        # Only fetch from API for online platforms (currently supporting Google)
+        if platform != "offline" and platform == "google":
+            logger.info("Fetching meeting metadata from API for platform=%s, meeting_id=%s", platform, meeting_id)
+            meeting_data = await fetch_meeting_metadata(meeting_id)
+            
+            if meeting_data:
+                return meeting_data
+            
+            logger.warning("Failed to fetch meeting metadata from API, using placeholder data")
+        
+        # Return placeholder data for offline or when API fails
+        logger.info("Using placeholder meeting metadata for platform=%s, meeting_id=%s", platform, meeting_id)
+        return None
 
-    async def _get_previous_meetings(self, recurring_meeting_id: str, count: int) -> List[Dict[str, Any]]:
+    async def _get_previous_meetings(self, recurring_meeting_id: str, count: int, from_date: Optional[str] = None, to_date: Optional[str] = None) -> List[Dict[str, Any]]:
         """
-        Fetch previous meetings for the recurring meeting series.
+        Fetch previous meetings for the recurring meeting series from API or return placeholder data.
         
-        This is a placeholder - replace with actual database query logic.
-        """
-        # TODO: Replace with actual database query
-        # Query should fetch the most recent 'count' meetings with the same recurring_meeting_id
-        # Order by datetime DESC, exclude future meetings
-        return [
-            {
-                "id": f"meeting_{i}",
-                "recurring_meeting_id": recurring_meeting_id,
-                "datetime": f"2025-10-{24-i:02d}T15:00:00Z",
-                "session_id": f"session_{i}",
-            }
-            for i in range(1, count + 1)
-        ]
+        Args:
+            recurring_meeting_id: Recurring meeting identifier
+            count: Number of previous meetings to fetch
+            platform: Meeting platform (e.g., 'google', 'zoom', 'offline')
+            
+        Returns:
+            List of previous meeting data
+        """        
+        meetings_data = await fetch_meetings_by_recurring_id(
+            recurring_meeting_id,
+            limit=count,
+            start=from_date,
+            end=to_date,
+        )
+        
+        if meetings_data and isinstance(meetings_data, list):
+            # Ensure we have the required fields for each meeting
+            processed_meetings = []
+            for meeting in meetings_data[:count]:  # Limit to requested count
+                if isinstance(meeting, dict):
+                    processed_meetings.append({
+                        "id": meeting.get("id", meeting.get("meetingId", f"meeting_{len(processed_meetings)+1}")),
+                        "recurring_meeting_id": recurring_meeting_id,
+                        "datetime": meeting.get("scheduled_datetime", meeting.get("scheduledDateTime", meeting.get("datetime"))),
+                        "session_id": meeting.get("session_id", meeting.get("sessionId", meeting.get("id"))),
+                    })
+            
+            if processed_meetings:
+                logger.info("Fetched %d previous meetings from API", len(processed_meetings))
+                return processed_meetings
+        
+        logger.warning("Failed to fetch previous meetings from API or no meetings found, using placeholder data")
+        return []
 
     async def _get_meeting_analyses(self, meetings: List[Dict[str, Any]]) -> List[MeetingAnalysis]:
         """

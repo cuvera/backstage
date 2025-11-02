@@ -102,4 +102,4 @@ def extract_recurring_meeting_id(meeting_data: Dict[str, Any]) -> Optional[str]:
     Returns:
         Recurring meeting ID or None if not found
     """
-    return meeting_data.get("recurring_meeting_id") or meeting_data.get("recurringMeetingId")
+    return meeting_data.get("recurringEventId")
