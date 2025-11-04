@@ -23,14 +23,14 @@ from app.services.vox_scribe.quadrant_service import Quadrant_service
 from app.services.vox_scribe.transcription_diarization_service import TranscriptionDiarizationService
 from app.services.vox_scribe.speaker_assignment_service import SpeakerAssignmentService
 from app.services.vox_scribe.main_pipeline import diarization_pipeline
-from app.services.call_analysis_service import CallAnalysisService
+from app.services.meeting_analysis_service import MeetingAnalysisService
 from app.utils.s3_client import download_s3_file
 
 logger = logging.getLogger(__name__)
 
 
-class MeetingProcessingServiceError(Exception):
-    """Custom exception for meeting processing service operations."""
+class MeetingOrchestratorError(Exception):
+    """Custom exception for meeting orchestrator operations."""
     pass
 
 
@@ -39,7 +39,7 @@ class MeetingAlreadyProcessedException(Exception):
     pass
 
 
-class MeetingProcessingService:
+class MeetingOrchestrator:
     """Main service for orchestrating meeting processing pipeline."""
     
     def __init__(self):
@@ -65,7 +65,7 @@ class MeetingProcessingService:
             # Extract payload from event_data
             payload = event_data.get('payload')
             if not payload:
-                raise MeetingProcessingServiceError("No payload found in event_data")
+                raise MeetingOrchestratorError("No payload found in event_data")
             
             logger.info(f"Processing meeting: {payload.get('summary', 'Unknown')}")
             
@@ -76,7 +76,7 @@ class MeetingProcessingService:
             bucket = payload.get('bucket', 'recordings')
             
             if not all([meeting_id, tenant_id]):
-                raise MeetingProcessingServiceError("Missing required fields in payload: _id, tenantId, or fileUrl")
+                raise MeetingOrchestratorError("Missing required fields in payload: _id, tenantId, or fileUrl")
             
             # Step 1: Merge audio files from S3
             logger.info("Step 1: Merging audio files from S3")
@@ -136,8 +136,8 @@ class MeetingProcessingService:
                 transcript_payload=transcript_payload or {}
             )
 
-            call_analysis_service = CallAnalysisService()
-            await call_analysis_service.save_analysis(analysis_result)
+            meeting_analysis_service = MeetingAnalysisService()
+            await meeting_analysis_service.save_analysis(analysis_result)
 
             merge_result["analysis"] = analysis_result
             merge_result["success"] = True
@@ -146,5 +146,5 @@ class MeetingProcessingService:
 
         except Exception as e:
             logger.error(f"Meeting processing failed for meeting {payload.get('_id', 'unknown')}: {str(e)}")
-            raise MeetingProcessingServiceError(f"Meeting processing failed: {str(e)}") from e
+            raise MeetingOrchestratorError(f"Meeting processing failed: {str(e)}") from e
         
