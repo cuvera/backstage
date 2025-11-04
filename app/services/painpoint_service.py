@@ -140,3 +140,54 @@ class PainPointsService:
             doc["_id"] = str(res.inserted_id)
             logger.info("[PainPointsService] Inserted after retry _id=%s", str(res.inserted_id))
             return doc
+
+    async def get_painpoint_analytics(self, period: int) -> list[dict[str, Any]]:
+        """
+        Fetches and aggregates pain point analytics across all departments.
+        """
+        from datetime import datetime, timedelta, timezone
+
+        collection = await self._ensure_collection()
+        analytics_collection = collection.database["daily_dept_painpoint_top10"]
+
+        start_date = datetime.now(timezone.utc) - timedelta(days=period)
+
+        pipeline = [
+            {
+                "$match": {
+                    "bucket_start": {"$gte": start_date}
+                }
+            },
+            {"$unwind": "$top10"},
+            {
+                "$match": {
+                    "top10.count": {"$gt": 0}  # include all valid pain points
+                }
+            },
+            {
+                "$group": {
+                    "_id": {
+                        "title": "$top10.title",
+                        "category": "$top10.category",
+                        "severity": "$top10.severity",
+                        "department": "$meta.department"
+                    },
+                    "total_count": {"$sum": "$top10.count"}
+                }
+            },
+            {
+                "$project": {
+                    "_id": 0,
+                    "title": "$_id.title",
+                    "department_name": "$_id.department",
+                    "category": "$_id.category",
+                    "severity": "$_id.severity",
+                    "count": "$total_count"
+                }
+            },
+            {"$sort": {"count": -1}}
+        ]
+
+        logger.info(f"[PainPointsService] Aggregating pain points across all departments for last {period} days")
+        results = await analytics_collection.aggregate(pipeline).to_list(None)
+        return results
