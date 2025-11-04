@@ -9,7 +9,7 @@ from pymongo import ASCENDING, DESCENDING
 
 from app.schemas.meeting_analysis import MeetingAnalysis, MeetingPrepPack
 from app.services.agents.meeting_prep_agent import MeetingPrepAgent, MeetingPrepAgentError
-from app.services.call_analysis_service import CallAnalysisService
+from app.services.meeting_analysis_service import MeetingAnalysisService
 from app.utils.meeting_metadata import (
     fetch_meeting_metadata,
     fetch_meetings_by_recurring_id,
@@ -42,7 +42,7 @@ class MeetingPrepService:
         self._collection_name = collection_name
         self._collection: Optional[AsyncIOMotorCollection] = None
         self._agent = MeetingPrepAgent()
-        self._analysis_service = CallAnalysisService(db=db)
+        self._analysis_service = MeetingAnalysisService(db=db)
 
     @classmethod
     async def from_default(cls, collection_name: str = COLLECTION) -> "MeetingPrepService":
@@ -51,7 +51,7 @@ class MeetingPrepService:
         db = await get_database()
         service = cls(db=db, collection_name=collection_name)
         await service.ensure_indexes()
-        service._analysis_service = CallAnalysisService(db=db)
+        service._analysis_service = MeetingAnalysisService(db=db)
         await service._analysis_service.ensure_indexes()
         return service
 
@@ -383,7 +383,7 @@ class MeetingPrepService:
 
     async def _get_meeting_analyses(self, meetings: List[Dict[str, Any]]) -> List[MeetingAnalysis]:
         """
-        Fetch meeting analyses for the given meetings from MongoDB using CallAnalysisService.
+        Fetch meeting analyses for the given meetings from MongoDB using MeetingAnalysisService.
         
         Args:
             meetings: List of meeting data with session_id fields
@@ -412,7 +412,7 @@ class MeetingPrepService:
             logger.warning("[MeetingPrepService] No valid session_ids found in meetings data")
             return []
         
-        # Fetch analyses using CallAnalysisService
+        # Fetch analyses using MeetingAnalysisService
         try:
             analysis_docs = await self._analysis_service.get_analyses_by_session_ids(
                 session_ids=session_ids,

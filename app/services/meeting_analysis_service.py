@@ -12,7 +12,7 @@ from app.schemas.meeting_analysis import MeetingAnalysis
 logger = logging.getLogger(__name__)
 
 
-class CallAnalysisService:
+class MeetingAnalysisService:
     """
     Minimal persistence layer for call analyses.
     Stores one document per (tenant_id, session_id) in MongoDB.
@@ -31,7 +31,7 @@ class CallAnalysisService:
         self._collection: Optional[AsyncIOMotorCollection] = None
 
     @classmethod
-    async def from_default(cls, collection_name: str = COLLECTION) -> "CallAnalysisService":
+    async def from_default(cls, collection_name: str = COLLECTION) -> "MeetingAnalysisService":
         from app.db.mongodb import get_database  # lazy import to avoid circular deps
 
         db = await get_database()
@@ -53,7 +53,7 @@ class CallAnalysisService:
 
     async def save_analysis(self, analysis: MeetingAnalysis) -> Dict[str, Any]:
         now = datetime.now(timezone.utc).isoformat()
-        doc: Dict[str, Any] = analysis.dict(exclude_none=True)
+        doc: Dict[str, Any] = analysis.model_dump(exclude_none=True)
         doc.setdefault("created_at", now)
         doc["updated_at"] = now
 
@@ -61,7 +61,7 @@ class CallAnalysisService:
         key = {"tenant_id": analysis.tenant_id, "session_id": analysis.session_id}
 
         logger.info(
-            "[CallAnalysisService] Upserting analysis for tenant=%s session=%s",
+            "[MeetingAnalysisService] Upserting analysis for tenant=%s session=%s",
             analysis.tenant_id,
             analysis.session_id,
         )
@@ -102,7 +102,7 @@ class CallAnalysisService:
             List of analysis documents
         """
         if not session_ids:
-            logger.warning("[CallAnalysisService] No session IDs provided for batch fetch")
+            logger.warning("[MeetingAnalysisService] No session IDs provided for batch fetch")
             return []
         
         collection = await self._ensure_collection()
@@ -118,7 +118,7 @@ class CallAnalysisService:
             docs = await cursor.to_list(length=len(session_ids) * 2)  # Allow for potential duplicates
             
             logger.info(
-                "[CallAnalysisService] Fetched %d analyses for %d session IDs",
+                "[MeetingAnalysisService] Fetched %d analyses for %d session IDs",
                 len(docs),
                 len(session_ids)
             )
@@ -126,7 +126,7 @@ class CallAnalysisService:
             
         except Exception as exc:
             logger.error(
-                "[CallAnalysisService] Error fetching analyses for session_ids %s: %s",
+                "[MeetingAnalysisService] Error fetching analyses for session_ids %s: %s",
                 session_ids,
                 exc
             )
