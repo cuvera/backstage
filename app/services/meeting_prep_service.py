@@ -9,13 +9,13 @@ from pymongo import ASCENDING, DESCENDING
 
 from app.schemas.meeting_analysis import MeetingAnalysis, MeetingPrepPack
 from app.services.agents.meeting_prep_agent import MeetingPrepAgent, MeetingPrepAgentError
+from app.services.call_analysis_service import CallAnalysisService
 from app.utils.meeting_metadata import (
     fetch_meeting_metadata,
     fetch_meetings_by_recurring_id,
-    extract_tenant_id,
     extract_recurring_meeting_id,
+    PLATFORM_COLLECTIONS,
 )
-from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,7 @@ class MeetingPrepService:
         self._collection_name = collection_name
         self._collection: Optional[AsyncIOMotorCollection] = None
         self._agent = MeetingPrepAgent()
+        self._analysis_service = CallAnalysisService(db=db)
 
     @classmethod
     async def from_default(cls, collection_name: str = COLLECTION) -> "MeetingPrepService":
@@ -50,6 +51,8 @@ class MeetingPrepService:
         db = await get_database()
         service = cls(db=db, collection_name=collection_name)
         await service.ensure_indexes()
+        service._analysis_service = CallAnalysisService(db=db)
+        await service._analysis_service.ensure_indexes()
         return service
 
     async def ensure_indexes(self) -> None:
@@ -117,7 +120,11 @@ class MeetingPrepService:
             
             # Fetch previous meetings and their analyses based on platform
             counts = previous_meeting_counts or self._agent.previous_meeting_counts
-            previous_meetings = await self._get_previous_meetings(resolved_recurring_id, counts, platform)
+            previous_meetings = await self._get_previous_meetings(
+                resolved_recurring_id, 
+                counts, 
+                platform=platform
+            )
             previous_analyses = await self._get_meeting_analyses(previous_meetings)
             
             # Generate prep pack using agent
@@ -129,12 +136,24 @@ class MeetingPrepService:
                 context=context,
             )
             
+            # Find immediate next meeting using already-fetched current meeting data
+            next_meeting_id = await self._find_immediate_next_meeting(
+                meeting_metadata,
+                resolved_recurring_id,
+                platform
+            )
+            
+            # Use next meeting ID if found, otherwise use current meeting_id
+            target_meeting_id = next_meeting_id or meeting_id
+            
             # Save to MongoDB
-            save_result = await self.save_prep_pack(prep_pack, meeting_id)
+            save_result = await self.save_prep_pack(prep_pack, target_meeting_id)
             
             logger.info(
-                "[MeetingPrepService] Generated and saved prep pack for meeting=%s recurring=%s",
+                "[MeetingPrepService] Generated prep pack for meeting=%s, saved for target=%s (next=%s), recurring=%s",
                 meeting_id,
+                target_meeting_id,
+                "found" if next_meeting_id else "not found",
                 prep_pack.recurring_meeting_id,
             )
             
@@ -302,7 +321,7 @@ class MeetingPrepService:
 
     async def _get_meeting_metadata(self, meeting_id: str, platform: str) -> Dict[str, Any]:
         """
-        Fetch meeting metadata from external API or return placeholder for offline/unsupported platforms.
+        Fetch meeting metadata from MongoDB collection.
         
         Args:
             meeting_id: Individual meeting identifier
@@ -311,90 +330,182 @@ class MeetingPrepService:
         Returns:
             Meeting metadata dictionary
         """
-        # Only fetch from API for online platforms (currently supporting Google)
+        # Only fetch from MongoDB for online platforms
         if platform != "offline" and platform == "google":
-            logger.info("Fetching meeting metadata from API for platform=%s, meeting_id=%s", platform, meeting_id)
-            meeting_data = await fetch_meeting_metadata(meeting_id)
+            logger.info("Fetching meeting metadata from MongoDB for platform=%s, meeting_id=%s", platform, meeting_id)
+            meeting_data = await fetch_meeting_metadata(meeting_id, self._db, platform)
             
             if meeting_data:
                 return meeting_data
             
-            logger.warning("Failed to fetch meeting metadata from API, using placeholder data")
+            logger.warning("Failed to fetch meeting metadata from MongoDB, using placeholder data")
         
-        # Return placeholder data for offline or when API fails
+        # Return None for offline or when MongoDB query fails
         logger.info("Using placeholder meeting metadata for platform=%s, meeting_id=%s", platform, meeting_id)
         return None
 
-    async def _get_previous_meetings(self, recurring_meeting_id: str, count: int, from_date: Optional[str] = None, to_date: Optional[str] = None) -> List[Dict[str, Any]]:
+    async def _get_previous_meetings(
+        self, 
+        recurring_meeting_id: str, 
+        count: int, 
+        platform: str = "google",
+        from_date: Optional[str] = None, 
+        to_date: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         """
-        Fetch previous meetings for the recurring meeting series from API or return placeholder data.
+        Fetch previous meetings for the recurring meeting series from MongoDB.
         
         Args:
             recurring_meeting_id: Recurring meeting identifier
             count: Number of previous meetings to fetch
             platform: Meeting platform (e.g., 'google', 'zoom', 'offline')
+            from_date: Start date filter (ISO format)
+            to_date: End date filter (ISO format)
             
         Returns:
             List of previous meeting data
         """        
         meetings_data = await fetch_meetings_by_recurring_id(
             recurring_meeting_id,
+            self._db,
+            platform=platform,
             limit=count,
             start=from_date,
             end=to_date,
         )
         
         if meetings_data and isinstance(meetings_data, list):
-            # Ensure we have the required fields for each meeting
-            processed_meetings = []
-            for meeting in meetings_data[:count]:  # Limit to requested count
-                if isinstance(meeting, dict):
-                    processed_meetings.append({
-                        "id": meeting.get("id", meeting.get("meetingId", f"meeting_{len(processed_meetings)+1}")),
-                        "recurring_meeting_id": recurring_meeting_id,
-                        "datetime": meeting.get("scheduled_datetime", meeting.get("scheduledDateTime", meeting.get("datetime"))),
-                        "session_id": meeting.get("session_id", meeting.get("sessionId", meeting.get("id"))),
-                    })
-            
-            if processed_meetings:
-                logger.info("Fetched %d previous meetings from API", len(processed_meetings))
-                return processed_meetings
+            logger.info("Fetched %d previous meetings from MongoDB", len(meetings_data))
+            return meetings_data[:count]  # Ensure we don't exceed requested count
         
-        logger.warning("Failed to fetch previous meetings from API or no meetings found, using placeholder data")
+        logger.warning("Failed to fetch previous meetings from MongoDB or no meetings found")
         return []
 
     async def _get_meeting_analyses(self, meetings: List[Dict[str, Any]]) -> List[MeetingAnalysis]:
         """
-        Fetch meeting analyses for the given meetings.
+        Fetch meeting analyses for the given meetings from MongoDB using CallAnalysisService.
         
-        This is a placeholder - replace with actual database query logic.
+        Args:
+            meetings: List of meeting data with session_id fields
+            
+        Returns:
+            List of MeetingAnalysis objects
         """
-        # TODO: Replace with actual database query
-        # Query meeting_analysis table for analyses matching the session_ids
-        analyses = []
-        for meeting in meetings:
-            # This would be replaced with actual database query
-            analysis_data = {
-                "tenant_id": "example_tenant",
-                "session_id": meeting["session_id"],
-                "summary": f"Meeting summary for {meeting['id']}",
-                "key_points": ["Point 1", "Point 2"],
-                "decisions": [],
-                "action_items": [],
-                "risks_issues": [],
-                "open_questions": ["How to improve process?"],
-                "topics": ["Process improvement", "Team coordination"],
-                "confidence": "medium",
-                "created_at": meeting["datetime"],
-            }
-            try:
-                analysis = MeetingAnalysis(**analysis_data)
-                analyses.append(analysis)
-            except ValidationError as e:
-                logger.warning(f"Failed to parse analysis for meeting {meeting['id']}: {e}")
-                continue
+        if not meetings:
+            logger.warning("[MeetingPrepService] No meetings provided for analysis fetch")
+            return []
         
-        return analyses
+        # Extract session IDs and tenant_id from meetings
+        session_ids = []
+        tenant_id = None
+        
+        for meeting in meetings:
+            session_id = meeting.get("session_id")
+            if session_id:
+                session_ids.append(session_id)
+            
+            # Extract tenant_id for security filtering (should be same for all meetings)
+            if not tenant_id:
+                tenant_id = meeting.get("tenant_id")
+        
+        if not session_ids:
+            logger.warning("[MeetingPrepService] No valid session_ids found in meetings data")
+            return []
+        
+        # Fetch analyses using CallAnalysisService
+        try:
+            analysis_docs = await self._analysis_service.get_analyses_by_session_ids(
+                session_ids=session_ids,
+                tenant_id=tenant_id
+            )
+            
+            # Convert documents to MeetingAnalysis objects
+            analyses = []
+            for doc in analysis_docs:
+                try:
+                    # The document should already be in the correct format for MeetingAnalysis
+                    analysis = MeetingAnalysis(**doc)
+                    analyses.append(analysis)
+                except Exception as e:
+                    logger.warning(
+                        "[MeetingPrepService] Failed to parse analysis for session %s: %s",
+                        doc.get("session_id"),
+                        e
+                    )
+                    continue
+            
+            logger.info(
+                "[MeetingPrepService] Retrieved %d analyses for %d meetings",
+                len(analyses),
+                len(meetings)
+            )
+            return analyses
+            
+        except Exception as exc:
+            logger.error(
+                "[MeetingPrepService] Error fetching analyses: %s",
+                exc
+            )
+            return []
+
+    async def _find_immediate_next_meeting(
+        self,
+        current_meeting_metadata: Dict[str, Any],
+        recurring_meeting_id: str,
+        platform: str = "google"
+    ) -> Optional[str]:
+        """
+        Find the immediate next scheduled meeting after the current meeting ends.
+        
+        Args:
+            current_meeting_metadata: Already fetched current meeting data
+            recurring_meeting_id: Recurring meeting series ID
+            platform: Meeting platform
+            
+        Returns:
+            Next meeting ID or None
+        """
+        if not current_meeting_metadata:
+            logger.warning("[MeetingPrepService] No current meeting metadata provided")
+            return None
+        
+        # Extract end time from current meeting
+        current_end_time = (
+            current_meeting_metadata.get("end_time") or 
+            current_meeting_metadata.get("end")
+        )
+        
+        if not current_end_time:
+            logger.warning("[MeetingPrepService] Current meeting has no end time")
+            return None
+        
+        # Query next scheduled meeting
+        collection_name = PLATFORM_COLLECTIONS.get(platform, "google_meetings")
+        collection = self._db[collection_name]
+        
+        try:
+            query = {
+                "recurringEventId": recurring_meeting_id,
+                "status": "scheduled",
+                "start": {"$gte": current_end_time},
+                "eventId": {"$ne": current_meeting_metadata.get("id")}
+            }
+            
+            # Get immediate next meeting
+            cursor = collection.find(query, {"eventId": 1}).sort("start", 1).limit(1)
+            docs = await cursor.to_list(length=1)
+            
+            if docs:
+                next_meeting_id = docs[0].get("eventId")
+                logger.info("[MeetingPrepService] Found immediate next meeting: %s", next_meeting_id)
+                return next_meeting_id
+            
+            logger.info("[MeetingPrepService] No immediate next scheduled meeting found")
+            return None
+            
+        except Exception as exc:
+            logger.error("[MeetingPrepService] Error finding next meeting: %s", exc)
+            return None
 
     async def _ensure_collection(self) -> AsyncIOMotorCollection:
         """Ensure the MongoDB collection is available."""
