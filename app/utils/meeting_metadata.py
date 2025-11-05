@@ -2,6 +2,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 import logging
 from typing import Dict, Any, Optional, List
 from datetime import datetime
+from bson.objectid import ObjectId
 
 from app.schemas.meeting_metadata import (
     google_meeting_to_metadata,
@@ -15,8 +16,6 @@ logger = logging.getLogger(__name__)
 # Platform-specific collection mapping
 PLATFORM_COLLECTIONS = {
     "google": "google_meetings",
-    "zoom": "zoom_meetings",  # Future expansion
-    "teams": "teams_meetings"  # Future expansion
 }
 
 async def fetch_meeting_metadata(
@@ -44,9 +43,9 @@ async def fetch_meeting_metadata(
     
     try:
         # Query by eventId for Google meetings
-        query_field = "eventId" if platform == "google" else "id"
-        doc = await collection.find_one({query_field: meeting_id})
-        
+        query_field = "_id"
+        doc = await collection.find_one({query_field: ObjectId(meeting_id)})
+
         if not doc:
             logger.warning("Meeting not found: meeting_id=%s, platform=%s", meeting_id, platform)
             return None

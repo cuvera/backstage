@@ -20,6 +20,7 @@ from app.schemas.meeting_analysis import (
     SeverityLevel,
 )
 from app.services.llm.factory import get_llm
+from app.state import llm_client
 
 logger = logging.getLogger(__name__)
 
@@ -118,22 +119,22 @@ class MeetingPrepAgent:
 
         INPUTS
         You will receive a JSON object with:
-        meeting: upcoming meeting metadata.
-        attendees: tentative
-        signals: machine-extracted summaries from ≥3 prior meetings (per-meeting summaries, topics, decisions, action items, open questions, sentiment, talk-time, transcript links).
+            - meeting: upcoming meeting metadata.
+            - attendees: tentative
+            - signals: machine-extracted summaries from ≥3 prior meetings (per-meeting summaries, topics, decisions, action items, open questions, sentiment, talk-time, transcript links).
 
         WHAT TO DO
-        Synthesize purpose and today_outcomes (decision/approval/alignment) from inputs and last 1 or more meetings.
-        Produce top_deltas (2–4 bullets) citing which previous meeting(s) they compare against.
-        Identify blocking_items (owner, ETA, impact) that must be cleared to decide today.
-        List leadership_asks (what executives must approve/decide today).
-        Create decision_queue with readiness scores (0–100) and explicit needs.
-        Build risk_radar (delivery, budget, people, compliance) with notes grounded in the last 1 or more meetings.
-        Populate confidence_bar (transcript confidence).
-        Critically add pre_meeting_questions:
-        - Derive from unresolved open questions, overdue actions, blockers, or data gaps across the last1 or more meetings.
-        - Each question must have: clear wording, ask_to (specific person(s) by email/role), priority (P0/P1/P2), due_by (IST), a short why (decision/blocker it unblocks), related_items (decision IDs, action IDs, agenda IDs), and source_meetings (IDs of prior meetings where the gap originated).
-        - Keep questions actionable and unambiguous.
+        - Synthesize purpose and today_outcomes (decision/approval/alignment) from inputs and last 1 or more meetings.
+        - Produce top_deltas (2–4 bullets) citing which previous meeting(s) they compare against.
+        - Identify blocking_items (owner, ETA, impact) that must be cleared to decide today.
+        - List leadership_asks (what executives must approve/decide today).
+        - Create decision_queue with readiness scores (0–100) and explicit needs.
+        - Build risk_radar (delivery, budget, people, compliance) with notes grounded in the last 1 or more meetings.
+        - Populate confidence_bar (transcript confidence).
+        - Critically add pre_meeting_questions:
+            - Derive from unresolved open questions, overdue actions, blockers, or data gaps across the last1 or more meetings.
+            - Each question must have: clear wording, ask_to (specific person(s) by email/role), priority (P0/P1/P2), due_by (IST), a short why (decision/blocker it unblocks), related_items (decision IDs, action IDs, agenda IDs), and source_meetings (IDs of prior meetings where the gap originated).
+            - Keep questions actionable and unambiguous.
 
         IMPORTANT
         - Do not come up with data on your own
@@ -191,6 +192,12 @@ class MeetingPrepAgent:
     def _call_llm(self, prompt: str) -> str:
         """Call the LLM with the prepared prompt."""
         try:
+            response = llm_client.chat.completions.create(
+                model="gemini-2.5-pro",
+                messages=[
+                    {"role": "user", "content": prompt}
+                ]
+            )
             response = self.llm.complete(prompt)
         except Exception as exc:
             logger.exception("[MeetingPrepAgent] LLM call failed: %s", exc)
@@ -241,14 +248,21 @@ class MeetingPrepAgent:
         now = datetime.now(timezone.utc).isoformat()
         
         # Build previous meeting references
-        previous_refs = [
-            PreviousMeetingReference(
-                meeting_id=meeting["id"],
-                analysis_id=meeting.get("session_id", ""),
-                datetime=meeting.get("datetime", ""),
-            )
-            for meeting in previous_meetings
-        ]
+        previous_refs = []
+        for meeting in previous_meetings:
+            meeting_id = meeting.get("id")
+            analysis_id = meeting.get("session_id")
+            datetime_str = meeting.get("start_date") or meeting.get("start") or meeting.get("datetime") or "unknown"
+            
+            # Only include meetings that have valid required fields
+            if meeting_id and analysis_id and datetime_str and len(datetime_str) > 0:
+                previous_refs.append(
+                    PreviousMeetingReference(
+                        meeting_id=meeting_id,
+                        analysis_id=analysis_id,
+                        datetime=datetime_str,
+                    )
+                )
         
         # Extract and validate data from LLM response
         prep_pack_data = {
