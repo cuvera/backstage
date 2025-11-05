@@ -18,6 +18,8 @@ from app.messaging.consumer import RabbitMQConsumerManager
 from app.messaging.producer import producer
 from app.services.jobs.daily_dept_painpoints import run_daily_department_painpoints_job
 from scripts.test_meeting_prep import quick_test
+from openai import AsyncOpenAI
+import httpx
 
 consumer_manager = RabbitMQConsumerManager()
 scheduler: AsyncIOScheduler | None = None
@@ -32,6 +34,14 @@ async def lifespan(_: FastAPI):
         await connect_to_mongo()
         await producer.connect()
         await consumer_manager.start()
+
+        app.state.llm_client = AsyncOpenAI(
+            api_key=settings.GEMINI_API_KEY,
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+            timeout=20.0
+        )
+        app.state.httpx_client = httpx.AsyncClient(timeout=10.0)
+
         global scheduler
         scheduler = AsyncIOScheduler(timezone="UTC")
         cron_expression = settings.PAINPOINT_CRON_EXPRESSION
