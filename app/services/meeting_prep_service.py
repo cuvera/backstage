@@ -304,11 +304,16 @@ class MeetingPrepService:
         }
 
     def _resolve_recurring_meeting_id(
-        self, meeting_metadata: Dict[str, Any], recurring_meeting_id: Optional[str] = None
+        self, meeting_metadata: Optional[Dict[str, Any]], recurring_meeting_id: Optional[str] = None
     ) -> str:
         """Resolve recurring meeting ID from meeting details if not provided."""
         if recurring_meeting_id:
             return recurring_meeting_id
+        
+        # Handle case where meeting_metadata is None
+        if meeting_metadata is None:
+            logger.warning("Meeting metadata is None, cannot extract recurring_meeting_id")
+            return None
         
         # Use utility function to extract recurring meeting ID
         resolved_id = extract_recurring_meeting_id(meeting_metadata)
