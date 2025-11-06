@@ -20,7 +20,7 @@ from app.schemas.meeting_analysis import (
     SeverityLevel,
 )
 from app.services.llm.factory import get_llm
-from app.state import llm_client
+from app.core.openai_client import llm_client
 
 logger = logging.getLogger(__name__)
 
