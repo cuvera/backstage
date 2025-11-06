@@ -21,11 +21,11 @@ from app.utils.meeting_metadata import (
 logger = logging.getLogger(__name__)
 
 
-class MeetingPrepServiceError(Exception):
-    """Raised when the meeting prep service cannot complete its task."""
+class MeetingPrepCuratorServiceError(Exception):
+    """Raised when the meeting prep curator service cannot complete its task."""
 
 
-class MeetingPrepService:
+class MeetingPrepCuratorService:
     """
     Service layer for meeting preparation packs.
     Orchestrates MeetingPrepAgent and provides MongoDB persistence.
@@ -46,7 +46,7 @@ class MeetingPrepService:
         self._analysis_service = MeetingAnalysisService(db=db)
 
     @classmethod
-    async def from_default(cls, collection_name: str = COLLECTION) -> "MeetingPrepService":
+    async def from_default(cls, collection_name: str = COLLECTION) -> "MeetingPrepCuratorService":
         from app.db.mongodb import get_database  # lazy import to avoid circular deps
 
         db = await get_database()
@@ -163,7 +163,7 @@ class MeetingPrepService:
             save_result = await self.save_prep_pack(prep_pack, target_meeting_id)
             
             logger.info(
-                "[MeetingPrepService] Generated prep pack for meeting=%s, saved for target=%s (next=%s), recurring=%s",
+                "[MeetingPrepCuratorService] Generated prep pack for meeting=%s, saved for target=%s (next=%s), recurring=%s",
                 meeting_id,
                 target_meeting_id,
                 "found" if next_meeting_id else "not found",
@@ -176,11 +176,11 @@ class MeetingPrepService:
             }
             
         except MeetingPrepAgentError as exc:
-            logger.error("[MeetingPrepService] Agent error: %s", exc)
-            raise MeetingPrepServiceError(f"Failed to generate prep pack: {exc}") from exc
+            logger.error("[MeetingPrepCuratorService] Agent error: %s", exc)
+            raise MeetingPrepCuratorServiceError(f"Failed to generate prep pack: {exc}") from exc
         except Exception as exc:
-            logger.exception("[MeetingPrepService] Unexpected error: %s", exc)
-            raise MeetingPrepServiceError(f"Unexpected error: {exc}") from exc
+            logger.exception("[MeetingPrepCuratorService] Unexpected error: %s", exc)
+            raise MeetingPrepCuratorServiceError(f"Unexpected error: {exc}") from exc
 
     async def save_prep_pack(self, prep_pack: MeetingPrepPack, meeting_id: str) -> Dict[str, Any]:
         """
@@ -206,7 +206,7 @@ class MeetingPrepService:
         }
 
         logger.info(
-            "[MeetingPrepService] Upserting prep pack for tenant=%s recurring_meeting=%s",
+            "[MeetingPrepCuratorService] Upserting prep pack for tenant=%s recurring_meeting=%s",
             prep_pack.tenant_id,
             prep_pack.recurring_meeting_id,
         )
@@ -305,7 +305,7 @@ class MeetingPrepService:
         })
         
         logger.info(
-            "[MeetingPrepService] Deleted prep pack for tenant=%s recurring_meeting=%s, deleted_count=%d",
+            "[MeetingPrepCuratorService] Deleted prep pack for tenant=%s recurring_meeting=%s, deleted_count=%d",
             tenant_id,
             recurring_meeting_id,
             result.deleted_count,
@@ -412,7 +412,7 @@ class MeetingPrepService:
             List of MeetingAnalysis objects
         """
         if not meetings:
-            logger.warning("[MeetingPrepService] No meetings provided for analysis fetch")
+            logger.warning("[MeetingPrepCuratorService] No meetings provided for analysis fetch")
             return []
         
         # Extract session IDs and tenant_id from meetings
@@ -429,7 +429,7 @@ class MeetingPrepService:
                 tenant_id = meeting.get("tenant_id")
         
         if not session_ids:
-            logger.warning("[MeetingPrepService] No valid session_ids found in meetings data")
+            logger.warning("[MeetingPrepCuratorService] No valid session_ids found in meetings data")
             return []
         
         # Fetch analyses using MeetingAnalysisService
@@ -448,14 +448,14 @@ class MeetingPrepService:
                     analyses.append(analysis)
                 except Exception as e:
                     logger.warning(
-                        "[MeetingPrepService] Failed to parse analysis for session %s: %s",
+                        "[MeetingPrepCuratorService] Failed to parse analysis for session %s: %s",
                         doc.get("session_id"),
                         e
                     )
                     continue
             
             logger.info(
-                "[MeetingPrepService] Retrieved %d analyses for %d meetings",
+                "[MeetingPrepCuratorService] Retrieved %d analyses for %d meetings",
                 len(analyses),
                 len(meetings)
             )
@@ -463,7 +463,7 @@ class MeetingPrepService:
             
         except Exception as exc:
             logger.error(
-                "[MeetingPrepService] Error fetching analyses: %s",
+                "[MeetingPrepCuratorService] Error fetching analyses: %s",
                 exc
             )
             return []
@@ -486,7 +486,7 @@ class MeetingPrepService:
             Next meeting ID or None
         """
         if not current_meeting_metadata:
-            logger.warning("[MeetingPrepService] No current meeting metadata provided")
+            logger.warning("[MeetingPrepCuratorService] No current meeting metadata provided")
             return None
         
         # Extract end time from current meeting
@@ -496,7 +496,7 @@ class MeetingPrepService:
         )
         
         if not current_end_time:
-            logger.warning("[MeetingPrepService] Current meeting has no end time")
+            logger.warning("[MeetingPrepCuratorService] Current meeting has no end time")
             return None
         
         # Query next scheduled meeting
@@ -517,14 +517,14 @@ class MeetingPrepService:
             
             if docs:
                 next_meeting_id = docs[0].get("eventId")
-                logger.info("[MeetingPrepService] Found immediate next meeting: %s", next_meeting_id)
+                logger.info("[MeetingPrepCuratorService] Found immediate next meeting: %s", next_meeting_id)
                 return next_meeting_id
             
-            logger.info("[MeetingPrepService] No immediate next scheduled meeting found")
+            logger.info("[MeetingPrepCuratorService] No immediate next scheduled meeting found")
             return None
             
         except Exception as exc:
-            logger.error("[MeetingPrepService] Error finding next meeting: %s", exc)
+            logger.error("[MeetingPrepCuratorService] Error finding next meeting: %s", exc)
             return None
 
     async def _ensure_collection(self) -> AsyncIOMotorCollection:
