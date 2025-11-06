@@ -11,6 +11,7 @@ from pymongo import ASCENDING, DESCENDING
 from app.schemas.meeting_analysis import MeetingAnalysis, MeetingPrepPack
 from app.services.agents.meeting_prep_agent import MeetingPrepAgent, MeetingPrepAgentError
 from app.services.meeting_analysis_service import MeetingAnalysisService
+from bson.objectid import ObjectId
 from app.utils.meeting_metadata import (
     fetch_meeting_metadata,
     fetch_meetings_by_recurring_id,
@@ -141,7 +142,7 @@ class MeetingPrepCuratorService:
             previous_analyses.append(meeting_analysis)
 
             # Generate prep pack using agent
-            prep_pack = self._agent.generate_prep_pack(
+            prep_pack = await self._agent.generate_prep_pack(
                 meeting_metadata=meeting_metadata,
                 previous_analyses=previous_analyses,
                 recurring_meeting_id=resolved_recurring_id,
@@ -149,6 +150,7 @@ class MeetingPrepCuratorService:
                 context=context,
             )
             print(f"Prep Pack: {prep_pack}")
+
             # Find immediate next meeting using already-fetched current meeting data
             next_meeting_id = await self._find_immediate_next_meeting(
                 meeting_metadata,
@@ -156,6 +158,7 @@ class MeetingPrepCuratorService:
                 platform
             )
             print(f"Next Meeting ID: {next_meeting_id}")
+
             # Use next meeting ID if found, otherwise use current meeting_id
             target_meeting_id = next_meeting_id or meeting_id
             
@@ -197,11 +200,12 @@ class MeetingPrepCuratorService:
         doc: Dict[str, Any] = prep_pack.model_dump(exclude_none=True)
         doc.setdefault("created_at", now)
         doc["updated_at"] = now
+        doc["tenant_id"] = ObjectId(prep_pack.tenant_id)
         doc["meeting_id"] = meeting_id  # Store the meeting this prep pack is for
 
         collection = await self._ensure_collection()
         key = {
-            "tenant_id": prep_pack.tenant_id,
+            "tenant_id": ObjectId(prep_pack.tenant_id),
             "recurring_meeting_id": prep_pack.recurring_meeting_id,
         }
 
@@ -359,7 +363,6 @@ class MeetingPrepCuratorService:
             logger.warning("Failed to fetch meeting metadata from MongoDB, using placeholder data")
         
         # Return None for offline or when MongoDB query fails
-        logger.info("Using placeholder meeting metadata for platform=%s, meeting_id=%s", platform, meeting_id)
         return None
 
     async def _get_previous_meetings(
@@ -516,7 +519,8 @@ class MeetingPrepCuratorService:
             docs = await cursor.to_list(length=1)
             
             if docs:
-                next_meeting_id = docs[0].get("eventId")
+                print(f"Found next meeting: {docs}")
+                next_meeting_id = docs[0].get("_id")
                 logger.info("[MeetingPrepCuratorService] Found immediate next meeting: %s", next_meeting_id)
                 return next_meeting_id
             

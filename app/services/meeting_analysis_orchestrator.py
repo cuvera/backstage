@@ -31,15 +31,15 @@ from app.services.meeting_prep_curator_service import MeetingPrepCuratorService
 
 logger = logging.getLogger(__name__)
 
-class MeetingOrchestratorError(Exception):
-    """Custom exception for meeting orchestrator operations."""
+class MeetingAnalysisOrchestratorError(Exception):
+    """Custom exception for meeting analysis orchestrator operations."""
     pass
 
 
 class MeetingAlreadyProcessedException(Exception):
     """Exception raised when meeting is already processed or being processed."""
     pass
-class MeetingOrchestrator:
+class MeetingAnalysisOrchestrator:
     """Main service for orchestrating meeting processing pipeline."""
     
     def __init__(self):
@@ -49,7 +49,7 @@ class MeetingOrchestrator:
         self.td_service = TranscriptionDiarizationService()
         self.assignment_service = SpeakerAssignmentService(self.qdrant_service)
     
-    async def process_meeting_event(self, event_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def analyze_meeting(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
         Process meeting event by extracting payload and running audio merge and transcription pipeline.
         
@@ -61,11 +61,8 @@ class MeetingOrchestrator:
         """
         try:
             logger.info("Starting meeting event processing")
-            
-            # Extract payload from event_data
-            payload = event_data.get('payload')
             if not payload:
-                raise MeetingOrchestratorError("No payload found in event_data")
+                raise MeetingAnalysisOrchestratorError("No payload found in event_data")
             
             logger.info(f"Processing meeting: {payload.get('summary', 'Unknown')}")
             
@@ -76,7 +73,7 @@ class MeetingOrchestrator:
             bucket = payload.get('bucket', 'recordings')
             
             if not all([meeting_id, tenant_id]):
-                raise MeetingOrchestratorError("Missing required fields in payload: _id, tenantId, or fileUrl")
+                raise MeetingAnalysisOrchestratorError("Missing required fields in payload: _id, tenantId, or fileUrl")
             
             # Step 1: Merge audio files from S3
             logger.info("Step 1: Merging audio files from S3")
@@ -148,7 +145,7 @@ class MeetingOrchestrator:
 
         except Exception as e:
             logger.error(f"Meeting processing failed for meeting {payload.get('_id', 'unknown')}: {str(e)}")
-            raise MeetingOrchestratorError(f"Meeting processing failed: {str(e)}") from e
+            raise MeetingAnalysisOrchestratorError(f"Meeting processing failed: {str(e)}") from e
 
 async def save_transcription(meeting_id, tenant_id, vox_scribe_result):
     try:

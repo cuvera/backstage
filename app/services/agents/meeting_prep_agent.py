@@ -45,7 +45,7 @@ class MeetingPrepAgent:
         self.llm = llm or get_llm()
         self.previous_meeting_counts = previous_meeting_counts or self.DEFAULT_PREVIOUS_MEETING_COUNTS
 
-    def generate_prep_pack(
+    async def generate_prep_pack(
         self,
         meeting_metadata: Dict[str, Any],
         previous_analyses: List[MeetingAnalysis],
@@ -72,7 +72,7 @@ class MeetingPrepAgent:
         
         # Generate prep pack using LLM
         prompt = self._build_prompt(meeting_metadata, previous_analyses, ctx)
-        raw_response = self._call_llm(prompt)
+        raw_response = await self._call_llm(prompt)
         parsed_response = self._parse_response(raw_response)
         
         # Build and validate prep pack
@@ -189,16 +189,19 @@ class MeetingPrepAgent:
 
         return prompt
 
-    def _call_llm(self, prompt: str) -> str:
+    async def _call_llm(self, prompt: str) -> str:
         """Call the LLM with the prepared prompt."""
         try:
-            response = llm_client.chat.completions.create(
+            llm_response = await llm_client.chat.completions.create(
                 model="gemini-2.5-pro",
                 messages=[
                     {"role": "user", "content": prompt}
-                ]
+                ],
+                reasoning_effort="low",
             )
-            response = self.llm.complete(prompt)
+
+            response = llm_response.choices[0].message.content
+            # response = self.llm.complete(prompt)
         except Exception as exc:
             logger.exception("[MeetingPrepAgent] LLM call failed: %s", exc)
             raise MeetingPrepAgentError(f"llm call failed: {exc}") from exc
@@ -212,6 +215,9 @@ class MeetingPrepAgent:
         """Parse and validate the LLM response."""
         cleaned = self._strip_code_fence(raw.strip())
         try:
+            print('#'*80)
+            print(cleaned)
+            print('#'*80)
             return json.loads(cleaned)
         except json.JSONDecodeError:
             # Try to extract JSON from response
