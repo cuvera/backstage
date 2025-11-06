@@ -125,10 +125,9 @@ class MeetingPrepCuratorService:
             print(f"Resolved Recurring ID: {resolved_recurring_id}")
             
             # Fetch previous meetings and their analyses based on platform
-            counts = previous_meeting_counts
             previous_meetings = await self._get_previous_meetings(
-                resolved_recurring_id, 
-                counts, 
+                recurring_meeting_id=resolved_recurring_id, 
+                count = previous_meeting_counts, 
                 platform=platform,
                 to_date=meeting_metadata.get("start_time")
             )
