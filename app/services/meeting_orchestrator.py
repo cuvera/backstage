@@ -1,3 +1,4 @@
+from ast import dump
 import asyncio
 import logging
 import os
@@ -6,7 +7,7 @@ import shutil
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 from pathlib import Path
-
+import json
 from app.db.mongodb import get_database
 from app.models.meeting import (
     AudioProcessingResult,
@@ -17,6 +18,7 @@ from app.models.meeting import (
 )
 from app.schemas.meeting_analysis import MeetingAnalysis
 from app.services.agents.call_analysis_agent import CallAnalysisAgent
+from app.services.transcription_service import TranscriptionService
 from app.utils.audio_merger import merge_wav_files_from_s3, AudioMergerError
 from app.services.vox_scribe.audio_preprocessing_service import AudioPreprocessor
 from app.services.vox_scribe.quadrant_service import Quadrant_service
@@ -28,7 +30,6 @@ from app.utils.s3_client import download_s3_file
 
 logger = logging.getLogger(__name__)
 
-
 class MeetingOrchestratorError(Exception):
     """Custom exception for meeting orchestrator operations."""
     pass
@@ -38,6 +39,42 @@ class MeetingAlreadyProcessedException(Exception):
     """Exception raised when meeting is already processed or being processed."""
     pass
 
+# dummy_payload = {
+#     "_id": "69034a94bd25edb427558ce0",
+#     "tenantId": "69034a94bd25edb427558ce0",
+#     "platform": "google",
+#     "bucket": "recordings",
+#     "fileUrl": "689ddc0411e4209395942bee/google/6isa8pcg77vet5m2qkgpltc0t5/Cuvera Bot-2025-10-30T11:29:54.532Z.wav",
+#     "summary": "Cuvera Bot-2025-10-30T11:29:54.532Z",
+#     "datetime": "2025-10-30T11:29:54.532Z",
+#     "start": {
+#         "dateTime": "2025-10-30T11:29:54.532Z"
+#     }
+# }
+
+# dummy_payload = json.loads('''{
+#     "payload": {
+#         "_id": "69034a94bd25edb427558ce0",
+#         "tenantId": "69034a94bd25edb427558ce0",
+#         "platform": "google",
+#         "bucket": "recordings",
+#         "fileUrl": "689ddc0411e4209395942bee/google/6isa8pcg77vet5m2qkgpltc0t5/Cuvera Bot-2025-10-30T11:29:54.532Z.wav",
+#         "summary": "Cuvera Bot-2025-10-30T11:29:54.532Z",
+#         "datetime": "2025-10-30T11:29:54.532Z",
+#         "start": {"dateTime": "2025-10-30T11:29:54.532Z"}
+#     }
+# }''')
+# s3://cuverademo/689ddc0411e4209395942bee/google/6isa8pcg77vet5m2qkgpltc0t5/Cuvera Bot-2025-10-30T11:26:09.245Z.wav
+dummy_payload = json.loads('''{
+    "_id": "69034a94bd25edb427558ce0",
+    "tenantId": "69034a94bd25edb427558ce0",
+    "platform": "google",
+    "bucket": "cuverademo",
+    "fileUrl": "689ddc0411e4209395942bee/google/6isa8pcg77vet5m2qkgpltc0t5/Cuvera Bot-2025-10-30T11:29:54.532Z.wav",
+    "summary": "Cuvera Bot-2025-10-30T11:29:54.532Z",
+    "datetime": "2025-10-30T11:29:54.532Z",
+    "start": {"dateTime": "2025-10-30T11:29:54.532Z"}
+}''')
 
 class MeetingOrchestrator:
     """Main service for orchestrating meeting processing pipeline."""
@@ -63,7 +100,7 @@ class MeetingOrchestrator:
             logger.info("Starting meeting event processing")
             
             # Extract payload from event_data
-            payload = event_data.get('payload')
+            payload = event_data.get('payload') or dummy_payload
             if not payload:
                 raise MeetingOrchestratorError("No payload found in event_data")
             
@@ -109,16 +146,9 @@ class MeetingOrchestrator:
                 meeting_audio_path=file_url,
                 known_number_of_speakers=0
             )
-            logger.info(f"VoxScribe result: {vox_scribe_result}")
 
             if (len(vox_scribe_result) > 0):
-                merge_result["diarization"] = vox_scribe_result
-                merge_result["success"] = True
-                merge_result["meeting_id"] = meeting_id
-            else:
-                merge_result["success"] = False
-                merge_result["meeting_id"] = meeting_id
-                return merge_result
+                await save_transcription(meeting_id, tenant_id, vox_scribe_result)
             
             logger.info(f"Step 3: Meeting analysis")
             # Handle case where transcript_payload is a list (from vox_scribe pipeline)
@@ -147,4 +177,23 @@ class MeetingOrchestrator:
         except Exception as e:
             logger.error(f"Meeting processing failed for meeting {payload.get('_id', 'unknown')}: {str(e)}")
             raise MeetingOrchestratorError(f"Meeting processing failed: {str(e)}") from e
+
+async def save_transcription(meeting_id, tenant_id, vox_scribe_result):
+    try:
+        transcription_service = TranscriptionService()
+        await transcription_service.ensure_indexes()
         
+        transcription_result = await transcription_service.save_transcription(
+            meeting_id=meeting_id,
+            tenant_id=tenant_id,
+            conversation=vox_scribe_result,
+            processing_metadata={
+                "vox_scribe_version": "1.0",
+                "known_speakers": 0,
+                "audio_duration_seconds": None
+            }
+        )
+        logger.info(f"Saved transcription to MongoDB: {transcription_result}")
+        
+    except Exception as e:
+        logger.error(f"Failed to save transcription: {e}")
