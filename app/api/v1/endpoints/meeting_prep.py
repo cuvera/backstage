@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from app.services.meeting_prep_service import MeetingPrepService, MeetingPrepServiceError
+from app.services.meeting_prep_curator_service import MeetingPrepCuratorService, MeetingPrepCuratorServiceError
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +51,7 @@ async def generate_prep_pack(request: GeneratePrepPackRequest) -> PrepPackRespon
     3. Saves the prep pack to MongoDB for future retrieval
     """
     try:
-        service = await MeetingPrepService.from_default()
+        service = await MeetingPrepCuratorService.from_default()
         
         result = await service.generate_and_save_prep_pack(
             meeting_id=request.meeting_id,
@@ -72,7 +72,7 @@ async def generate_prep_pack(request: GeneratePrepPackRequest) -> PrepPackRespon
             message="Prep pack generated and saved successfully",
         )
         
-    except MeetingPrepServiceError as exc:
+    except MeetingPrepCuratorServiceError as exc:
         logger.error("[MeetingPrepAPI] Service error: %s", exc)
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
@@ -91,99 +91,99 @@ async def get_prep_pack_by_meeting_id(
     Returns the prep pack associated with a specific meeting.
     """
 
-    # try:
-    #     service = await MeetingPrepService.from_default()
+    try:
+        service = await MeetingPrepCuratorService.from_default()
         
-    #     prep_pack = await service.get_prep_pack_by_meeting_id(
-    #         tenant_id=tenant_id,
-    #         meeting_id=meeting_id,
-    #     )
+        prep_pack = await service.get_prep_pack_by_meeting_id(
+            tenant_id=tenant_id,
+            meeting_id=meeting_id,
+        )
         
-    #     if not prep_pack:
-    #         raise HTTPException(
-    #             status_code=404,
-    #             detail=f"No prep pack found for meeting {meeting_id}",
-    #         )
+        if not prep_pack:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No prep pack found for meeting {meeting_id}",
+            )
         
-    #     logger.info(
-    #         "[MeetingPrepAPI] Retrieved prep pack for meeting=%s tenant=%s",
-    #         meeting_id,
-    #         tenant_id,
-    #     )
-    prep_pack = {
-        "id": meeting_id,
-        "title": "Biot System: Multilanguage & Transcription Sync",
-        "tenantId": tenant_id,
-        "timezone": "Asia/Calcutta",
-        "locale": "en-US",
-        "purpose": "To align on a solution for accurately matching transcribed timestamps to speaker-mapped audio segments within the Biot system, enabling robust multilanguage support and advancing transcription capabilities.",
-        "confidence": "medium",
-        "expected_outcomes": [
-            {
-            "description": "Decision on the technical approach to accurately match transcribed timestamps to speaker-mapped audio segments in the Biot system.",
-            "owner": "",
-            "type": "decision"
-            }
-        ],
-        "blocking_items": [
-            {
-            "title": "Accurate matching of transcribed timestamps to speaker-mapped audio segments",
-            "owner": "",
-            "eta": "",
-            "impact": "Blocks full implementation and effectiveness of Biot system's multilanguage transcription capabilities and speaker diarization features.",
-            "severity": "high",
-            "status": "open"
-            }
-        ],
-        "decision_queue": [
-            {
-            "id": "Biot-TS-Match-001",
-            "title": "Solution for Transcribed Timestamp to Speaker-Mapped Audio Segment Matching",
-            "needs": [
-                "Proposed technical solution for timestamp synchronization",
-                "Resource allocation for solution development and integration"
-            ],
-            "owner": ""
-            }
-        ],
-        "key_points": [
-            "The 'Biot' system is understood to support multilanguage capabilities.",
-            "Multilanguage support prioritization is linked to voice activity detection, suggesting it may only be applied to active speakers.",
-            "The 'Biot' system splits audio into various segments and maps them to individual speakers.",
-            "A critical challenge is to accurately match transcribed timestamps to the corresponding speaker-mapped audio segments."
-        ],
-        "open_questions": [
-            "How can transcribed timestamps be accurately matched to speaker-mapped audio segments?"
-        ],
-        "risks_issues": [
-            "Delivery Risk: Inability to accurately match transcribed timestamps to speaker-mapped audio segments, hindering full Biot system functionality and multilanguage transcription accuracy."
-        ],
-        "leadership_asks": [
-            "Approve the proposed technical solution for resolving the timestamp matching challenge.",
-            "Allocate necessary engineering resources to implement the chosen solution for Biot system transcription."
-        ],
-        "previous_meetings_ref": [
-            {
-            "meeting_id": "68f9bde68bde1c2327cc15dd",
-            "analysis_id": "68f9bde68bde1c2327cc15dd",
-            "datetime": "2025-10-30T09:40:00.000Z"
-            }
-        ],
-        "created_at": "2025-10-31T09:40:00.000Z",
-        "updated_at": "2025-10-31T09:40:00.000Z"
-    }
+        logger.info(
+            "[MeetingPrepAPI] Retrieved prep pack for meeting=%s tenant=%s",
+            meeting_id,
+            tenant_id,
+        )
+    # prep_pack = {
+    #     "id": meeting_id,
+    #     "title": "Biot System: Multilanguage & Transcription Sync",
+    #     "tenantId": tenant_id,
+    #     "timezone": "Asia/Calcutta",
+    #     "locale": "en-US",
+    #     "purpose": "To align on a solution for accurately matching transcribed timestamps to speaker-mapped audio segments within the Biot system, enabling robust multilanguage support and advancing transcription capabilities.",
+    #     "confidence": "medium",
+    #     "expected_outcomes": [
+    #         {
+    #         "description": "Decision on the technical approach to accurately match transcribed timestamps to speaker-mapped audio segments in the Biot system.",
+    #         "owner": "",
+    #         "type": "decision"
+    #         }
+    #     ],
+    #     "blocking_items": [
+    #         {
+    #         "title": "Accurate matching of transcribed timestamps to speaker-mapped audio segments",
+    #         "owner": "",
+    #         "eta": "",
+    #         "impact": "Blocks full implementation and effectiveness of Biot system's multilanguage transcription capabilities and speaker diarization features.",
+    #         "severity": "high",
+    #         "status": "open"
+    #         }
+    #     ],
+    #     "decision_queue": [
+    #         {
+    #         "id": "Biot-TS-Match-001",
+    #         "title": "Solution for Transcribed Timestamp to Speaker-Mapped Audio Segment Matching",
+    #         "needs": [
+    #             "Proposed technical solution for timestamp synchronization",
+    #             "Resource allocation for solution development and integration"
+    #         ],
+    #         "owner": ""
+    #         }
+    #     ],
+    #     "key_points": [
+    #         "The 'Biot' system is understood to support multilanguage capabilities.",
+    #         "Multilanguage support prioritization is linked to voice activity detection, suggesting it may only be applied to active speakers.",
+    #         "The 'Biot' system splits audio into various segments and maps them to individual speakers.",
+    #         "A critical challenge is to accurately match transcribed timestamps to the corresponding speaker-mapped audio segments."
+    #     ],
+    #     "open_questions": [
+    #         "How can transcribed timestamps be accurately matched to speaker-mapped audio segments?"
+    #     ],
+    #     "risks_issues": [
+    #         "Delivery Risk: Inability to accurately match transcribed timestamps to speaker-mapped audio segments, hindering full Biot system functionality and multilanguage transcription accuracy."
+    #     ],
+    #     "leadership_asks": [
+    #         "Approve the proposed technical solution for resolving the timestamp matching challenge.",
+    #         "Allocate necessary engineering resources to implement the chosen solution for Biot system transcription."
+    #     ],
+    #     "previous_meetings_ref": [
+    #         {
+    #         "meeting_id": "68f9bde68bde1c2327cc15dd",
+    #         "analysis_id": "68f9bde68bde1c2327cc15dd",
+    #         "datetime": "2025-10-30T09:40:00.000Z"
+    #         }
+    #     ],
+    #     "created_at": "2025-10-31T09:40:00.000Z",
+    #     "updated_at": "2025-10-31T09:40:00.000Z"
+    # }
 
-    return PrepPackResponse(
-        success=True,
-        data=prep_pack,
-        message="Prep pack retrieved successfully",
-    )
+        return PrepPackResponse(
+            success=True,
+            data=prep_pack,
+            message="Prep pack retrieved successfully",
+        )
         
-    # except HTTPException:
-    #     raise
-    # except Exception as exc:
-    #     logger.exception("[MeetingPrepAPI] Unexpected error: %s", exc)
-    #     raise HTTPException(status_code=500, detail="Internal server error")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("[MeetingPrepAPI] Unexpected error: %s", exc)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/recurring/{recurring_meeting_id}", response_model=PrepPackResponse)
@@ -197,7 +197,7 @@ async def get_prep_pack_by_recurring_meeting_id(
     Returns the most recent prep pack for a recurring meeting series.
     """
     try:
-        service = await MeetingPrepService.from_default()
+        service = await MeetingPrepCuratorService.from_default()
         
         prep_pack = await service.get_prep_pack_by_recurring_meeting_id(
             tenant_id=tenant_id,
@@ -241,7 +241,7 @@ async def get_prep_pack_history(
     Returns multiple prep packs for a recurring meeting, ordered by creation date (newest first).
     """
     try:
-        service = await MeetingPrepService.from_default()
+        service = await MeetingPrepCuratorService.from_default()
         
         prep_packs = await service.get_prep_packs_by_recurring_meeting_id(
             tenant_id=tenant_id,
@@ -279,7 +279,7 @@ async def delete_prep_pack(
     Removes the prep pack associated with a recurring meeting series.
     """
     try:
-        service = await MeetingPrepService.from_default()
+        service = await MeetingPrepCuratorService.from_default()
         
         result = await service.delete_prep_pack(
             tenant_id=tenant_id,

@@ -27,7 +27,7 @@ from app.services.vox_scribe.speaker_assignment_service import SpeakerAssignment
 from app.services.vox_scribe.main_pipeline import diarization_pipeline
 from app.services.meeting_analysis_service import MeetingAnalysisService
 from app.utils.s3_client import download_s3_file
-from app.services.meeting_prep_service import MeetingPrepService
+from app.services.meeting_prep_curator_service import MeetingPrepCuratorService
 
 logger = logging.getLogger(__name__)
 
@@ -39,44 +39,6 @@ class MeetingOrchestratorError(Exception):
 class MeetingAlreadyProcessedException(Exception):
     """Exception raised when meeting is already processed or being processed."""
     pass
-
-# dummy_payload = {
-#     "_id": "69034a94bd25edb427558ce0",
-#     "tenantId": "69034a94bd25edb427558ce0",
-#     "platform": "google",
-#     "bucket": "recordings",
-#     "fileUrl": "689ddc0411e4209395942bee/google/6isa8pcg77vet5m2qkgpltc0t5/Cuvera Bot-2025-10-30T11:29:54.532Z.wav",
-#     "summary": "Cuvera Bot-2025-10-30T11:29:54.532Z",
-#     "datetime": "2025-10-30T11:29:54.532Z",
-#     "start": {
-#         "dateTime": "2025-10-30T11:29:54.532Z"
-#     }
-# }
-
-# dummy_payload = json.loads('''{
-#     "payload": {
-#         "_id": "69034a94bd25edb427558ce0",
-#         "tenantId": "69034a94bd25edb427558ce0",
-#         "platform": "google",
-#         "bucket": "recordings",
-#         "fileUrl": "689ddc0411e4209395942bee/google/6isa8pcg77vet5m2qkgpltc0t5/Cuvera Bot-2025-10-30T11:29:54.532Z.wav",
-#         "summary": "Cuvera Bot-2025-10-30T11:29:54.532Z",
-#         "datetime": "2025-10-30T11:29:54.532Z",
-#         "start": {"dateTime": "2025-10-30T11:29:54.532Z"}
-#     }
-# }''')
-# s3://cuverademo/689ddc0411e4209395942bee/google/6isa8pcg77vet5m2qkgpltc0t5/Cuvera Bot-2025-10-30T11:26:09.245Z.wav
-dummy_payload = json.loads('''{
-    "_id": "69034a94bd25edb427558ce0",
-    "tenantId": "69034a94bd25edb427558ce0",
-    "platform": "google",
-    "bucket": "cuverademo",
-    "fileUrl": "689ddc0411e4209395942bee/google/6isa8pcg77vet5m2qkgpltc0t5/Cuvera Bot-2025-10-30T11:29:54.532Z.wav",
-    "summary": "Cuvera Bot-2025-10-30T11:29:54.532Z",
-    "datetime": "2025-10-30T11:29:54.532Z",
-    "start": {"dateTime": "2025-10-30T11:29:54.532Z"}
-}''')
-
 class MeetingOrchestrator:
     """Main service for orchestrating meeting processing pipeline."""
     
@@ -101,7 +63,7 @@ class MeetingOrchestrator:
             logger.info("Starting meeting event processing")
             
             # Extract payload from event_data
-            payload = event_data.get('payload') or dummy_payload
+            payload = event_data.get('payload')
             if not payload:
                 raise MeetingOrchestratorError("No payload found in event_data")
             
@@ -171,7 +133,7 @@ class MeetingOrchestrator:
             await meeting_analysis_service.save_analysis(analysis_result)
 
             logger.info(f"Step 4: Generate meeting prepration suggestion")
-            meeting_prep_service = await MeetingPrepService.from_default()
+            meeting_prep_service = await MeetingPrepCuratorService.from_default()
             prep_pack = await meeting_prep_service.generate_and_save_prep_pack(
                 meeting_id=meeting_id,
                 meeting_analysis=analysis_result,

@@ -14,7 +14,7 @@ script_dir = Path(__file__).parent
 project_root = script_dir.parent
 sys.path.insert(0, str(project_root))
 
-from app.services.meeting_prep_service import MeetingPrepService
+from app.services.meeting_prep_curator_service import MeetingPrepCuratorService
 # from app.db.mongodb import connect_to_mongo, close_mongo_connection
 # from app.db.mongodb import get_database  # local import to avoid circular deps
 
@@ -42,10 +42,10 @@ async def test_meeting_prep():
         db = await get_database()
         logger.info("✅ Connected to MongoDB successfully")
         
-        # Initialize MeetingPrepService
-        logger.info("Initializing MeetingPrepService...")
-        prep_service = await MeetingPrepService.from_default()
-        logger.info("✅ MeetingPrepService initialized successfully")
+        # Initialize MeetingPrepCuratorService
+        logger.info("Initializing MeetingPrepCuratorService...")
+        prep_service = await MeetingPrepCuratorService.from_default()
+        logger.info("✅ MeetingPrepCuratorService initialized successfully")
         
         # Generate and save prep pack
         logger.info("Generating prep pack...")
@@ -181,7 +181,7 @@ async def test_multiple_scenarios():
             }
         ]
         
-        prep_service = await MeetingPrepService.from_default()
+        prep_service = await MeetingPrepCuratorService.from_default()
         
         for i, scenario in enumerate(scenarios, 1):
             logger.info(f"\n{'='*60}")
@@ -227,7 +227,7 @@ async def quick_test():
         # Connect to MongoDB
         # await connect_to_mongo()
         
-        prep_service = await MeetingPrepService.from_default()
+        prep_service = await MeetingPrepCuratorService.from_default()
         
         result = await prep_service.generate_and_save_prep_pack(
             meeting_id=TEST_MEETING_ID,

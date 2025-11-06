@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Complete test for MeetingPrepAgent + MeetingPrepService + API endpoints.
+Complete test for MeetingPrepAgent + MeetingPrepCuratorService + API endpoints.
 Tests the full flow from agent to service to API.
 """
 
@@ -18,8 +18,8 @@ def test_imports():
         from app.services.agents.meeting_prep_agent import MeetingPrepAgent, MeetingPrepAgentError
         print("✓ MeetingPrepAgent imported successfully")
         
-        from app.services.meeting_prep_service import MeetingPrepService, MeetingPrepServiceError
-        print("✓ MeetingPrepService imported successfully")
+        from app.services.meeting_prep_curator_service import MeetingPrepCuratorService, MeetingPrepCuratorServiceError
+        print("✓ MeetingPrepCuratorService imported successfully")
         
         from app.api.v1.endpoints.meeting_prep import (
             router,
@@ -76,14 +76,14 @@ def test_agent_functionality():
         return False
 
 async def test_service_functionality():
-    """Test the MeetingPrepService functionality (without actual DB)."""
-    print("\nTesting MeetingPrepService structure...")
+    """Test the MeetingPrepCuratorService functionality (without actual DB)."""
+    print("\nTesting MeetingPrepCuratorService structure...")
     
     try:
-        from app.services.meeting_prep_service import MeetingPrepService
+        from app.services.meeting_prep_curator_service import MeetingPrepCuratorService
         
         # Test service creation (without DB connection)
-        service = MeetingPrepService()
+        service = MeetingPrepCuratorService()
         print("✓ Service created successfully")
         
         # Test that service has required methods
@@ -236,7 +236,7 @@ def print_implementation_summary():
     
     print("\n✓ Created Components:")
     print("  • MeetingPrepAgent - Core AI agent for prep pack generation")
-    print("  • MeetingPrepService - Service layer with MongoDB operations")
+    print("  • MeetingPrepCuratorService - Service layer with MongoDB operations")
     print("  • API Endpoints - Complete REST API for prep pack operations")
     print("  • Schemas - Pydantic models for validation")
     
