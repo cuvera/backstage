@@ -27,6 +27,7 @@ from app.services.vox_scribe.speaker_assignment_service import SpeakerAssignment
 from app.services.vox_scribe.main_pipeline import diarization_pipeline
 from app.services.meeting_analysis_service import MeetingAnalysisService
 from app.utils.s3_client import download_s3_file
+from app.services.meeting_prep_service import MeetingPrepService
 
 logger = logging.getLogger(__name__)
 
@@ -169,7 +170,16 @@ class MeetingOrchestrator:
             meeting_analysis_service = MeetingAnalysisService()
             await meeting_analysis_service.save_analysis(analysis_result)
 
+            logger.info(f"Step 4: Generate meeting prepration suggestion")
+            meeting_prep_service = await MeetingPrepService.from_default()
+            prep_pack = await meeting_prep_service.generate_and_save_prep_pack(
+                meeting_id=meeting_id,
+                meeting_analysis=analysis_result,
+                platform=platform
+            )
+
             merge_result["analysis"] = analysis_result
+            merge_result["prep_pack"] = prep_pack
             merge_result["success"] = True
             merge_result["meeting_id"] = meeting_id
             return merge_result
