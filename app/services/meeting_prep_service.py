@@ -4,6 +4,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from audmath import db
 from motor.motor_asyncio import AsyncIOMotorCollection, AsyncIOMotorDatabase
 from pymongo import ASCENDING, DESCENDING
 
@@ -81,6 +82,7 @@ class MeetingPrepService:
     async def generate_and_save_prep_pack(
         self,
         meeting_id: str,
+        meeting_analysis: MeetingAnalysis,
         platform: str,
         *,
         recurring_meeting_id: Optional[str] = None,
@@ -130,13 +132,14 @@ class MeetingPrepService:
                 to_date=meeting_metadata.get("start_time")
             )
 
-            # Add current meeting to previous meetings
-            previous_meetings.append(meeting_metadata)
-
             print(f"Previous Meetings: {previous_meetings}")
             previous_analyses = await self._get_meeting_analyses(previous_meetings)
             print(f"Previous Analyses: {previous_analyses}")
             
+            # Add current meeting to previous meetings and it's analysis
+            previous_meetings.append(meeting_metadata)
+            previous_analyses.append(meeting_analysis)
+
             # Generate prep pack using agent
             prep_pack = self._agent.generate_prep_pack(
                 meeting_metadata=meeting_metadata,
