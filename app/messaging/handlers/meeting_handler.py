@@ -4,9 +4,9 @@ from typing import Any, Dict
 
 from aio_pika.abc import AbstractIncomingMessage
 
-from app.services.meeting_processing_service import (
-    MeetingProcessingService, 
-    MeetingProcessingServiceError,
+from app.services.meeting_orchestrator import (
+    MeetingOrchestrator, 
+    MeetingOrchestratorError,
     MeetingAlreadyProcessedException
 )
 
@@ -41,7 +41,7 @@ async def meeting_handler(message: AbstractIncomingMessage) -> None:
             return
         
         # Initialize processing service
-        processing_service = MeetingProcessingService()
+        processing_service = MeetingOrchestrator()
         
         # Process the meeting event directly with raw payload
         try:
@@ -58,7 +58,7 @@ async def meeting_handler(message: AbstractIncomingMessage) -> None:
             logger.info(f"Meeting already processed or being processed: {e}")
             await message.ack()  # Acknowledge message as successfully handled
             
-        except MeetingProcessingServiceError as e:
+        except MeetingOrchestratorError as e:
             logger.error(f"Meeting processing service error: {e}")
             
             # Check if this is a retryable error

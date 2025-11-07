@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from motor.motor_asyncio import AsyncIOMotorCollection, AsyncIOMotorDatabase
 from pymongo import ASCENDING
@@ -12,7 +12,7 @@ from app.schemas.meeting_analysis import MeetingAnalysis
 logger = logging.getLogger(__name__)
 
 
-class CallAnalysisService:
+class MeetingAnalysisService:
     """
     Minimal persistence layer for call analyses.
     Stores one document per (tenant_id, session_id) in MongoDB.
@@ -31,7 +31,7 @@ class CallAnalysisService:
         self._collection: Optional[AsyncIOMotorCollection] = None
 
     @classmethod
-    async def from_default(cls, collection_name: str = COLLECTION) -> "CallAnalysisService":
+    async def from_default(cls, collection_name: str = COLLECTION) -> "MeetingAnalysisService":
         from app.db.mongodb import get_database  # lazy import to avoid circular deps
 
         db = await get_database()
@@ -53,7 +53,7 @@ class CallAnalysisService:
 
     async def save_analysis(self, analysis: MeetingAnalysis) -> Dict[str, Any]:
         now = datetime.now(timezone.utc).isoformat()
-        doc: Dict[str, Any] = analysis.dict(exclude_none=True)
+        doc: Dict[str, Any] = analysis.model_dump(exclude_none=True)
         doc.setdefault("created_at", now)
         doc["updated_at"] = now
 
@@ -61,7 +61,7 @@ class CallAnalysisService:
         key = {"tenant_id": analysis.tenant_id, "session_id": analysis.session_id}
 
         logger.info(
-            "[CallAnalysisService] Upserting analysis for tenant=%s session=%s",
+            "[MeetingAnalysisService] Upserting analysis for tenant=%s session=%s",
             analysis.tenant_id,
             analysis.session_id,
         )
@@ -84,6 +84,53 @@ class CallAnalysisService:
             {"_id": 0},
         )
         return record
+
+    async def get_analyses_by_session_ids(
+        self, 
+        *, 
+        session_ids: List[str], 
+        tenant_id: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Get multiple analyses by session IDs.
+        
+        Args:
+            session_ids: List of session identifiers to fetch analyses for
+            tenant_id: Optional tenant filter for security
+            
+        Returns:
+            List of analysis documents
+        """
+        if not session_ids:
+            logger.warning("[MeetingAnalysisService] No session IDs provided for batch fetch")
+            return []
+        
+        collection = await self._ensure_collection()
+        
+        try:
+            # Build query
+            query = {"session_id": {"$in": session_ids}}
+            if tenant_id:
+                query["tenant_id"] = tenant_id
+            
+            # Execute query
+            cursor = collection.find(query, {"_id": 0}).sort("created_at", -1)
+            docs = await cursor.to_list(length=len(session_ids) * 2)  # Allow for potential duplicates
+            
+            logger.info(
+                "[MeetingAnalysisService] Fetched %d analyses for %d session IDs",
+                len(docs),
+                len(session_ids)
+            )
+            return docs
+            
+        except Exception as exc:
+            logger.error(
+                "[MeetingAnalysisService] Error fetching analyses for session_ids %s: %s",
+                session_ids,
+                exc
+            )
+            return []
 
     async def _ensure_collection(self) -> AsyncIOMotorCollection:
         if self._collection is None:
