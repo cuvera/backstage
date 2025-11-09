@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import logging
+from os import name
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
+from fastapi import Header
 
 from app.services.meeting_prep_curator_service import MeetingPrepCuratorService, MeetingPrepCuratorServiceError
 
@@ -80,10 +82,10 @@ async def generate_prep_pack(request: GeneratePrepPackRequest) -> PrepPackRespon
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.get("/{meeting_id}", response_model=PrepPackResponse)
+@router.get("/prep/{meeting_id}", response_model=PrepPackResponse)
 async def get_prep_pack_by_meeting_id(
     meeting_id: str,
-    tenant_id: str = Query(default="689ddc0411e4209395942bee", description="Tenant identifier"),
+    tenant_id: str = Header(name="tenant-id", description="Tenant identifier"),
 ) -> PrepPackResponse:
     """
     Get a prep pack by meeting ID.
@@ -94,6 +96,8 @@ async def get_prep_pack_by_meeting_id(
     try:
         service = await MeetingPrepCuratorService.from_default()
         
+        print("Controller: Meeting ID", meeting_id)
+        print("Controller: Tenant ID", tenant_id)
         prep_pack = await service.get_prep_pack_by_meeting_id(
             tenant_id=tenant_id,
             meeting_id=meeting_id,

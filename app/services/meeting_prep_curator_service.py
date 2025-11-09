@@ -235,7 +235,7 @@ class MeetingPrepCuratorService:
             logger.info("Fetching meeting metadata from MongoDB for platform=%s, meeting_id=%s", platform, meeting_id)
             # Use repository's database connection
             db = self._repository._db if self._repository else None
-            if db:
+            if db is not None:
                 meeting_data = await fetch_meeting_metadata(meeting_id, db, platform)
                 
                 if meeting_data:
@@ -269,7 +269,7 @@ class MeetingPrepCuratorService:
         """        
         # Use repository's database connection
         db = self._repository._db if self._repository else None
-        if not db:
+        if db is None:
             logger.warning("No database connection available for fetching previous meetings")
             return []
 

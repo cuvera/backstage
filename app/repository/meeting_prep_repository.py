@@ -73,7 +73,7 @@ class MeetingPrepRepository(BaseRepository):
         doc.setdefault("created_at", now)
         doc["updated_at"] = now
         doc["tenant_id"] = ObjectId(prep_pack.tenant_id)
-        doc["meeting_id"] = meeting_id  # Store the meeting this prep pack is for
+        doc["meeting_id"] = ObjectId(meeting_id)  # Store the meeting this prep pack is for
 
         collection = await self._ensure_collection()
         key = {
@@ -112,10 +112,19 @@ class MeetingPrepRepository(BaseRepository):
             Prep pack data or None if not found
         """
         collection = await self._ensure_collection()
+        print("tenant_id", tenant_id)
+        print("meeting_id", meeting_id)
         record = await collection.find_one(
-            {"tenant_id": tenant_id, "meeting_id": meeting_id},
+            {"tenant_id": ObjectId(tenant_id), "meeting_id": ObjectId(meeting_id)},
             {"_id": 0},
         )
+        
+        if record:
+            if "tenant_id" in record:
+                record["tenant_id"] = str(record["tenant_id"])
+            if "meeting_id" in record:
+                record["meeting_id"] = str(record["meeting_id"])
+        
         return record
 
     async def get_prep_pack_by_recurring_meeting_id(
@@ -133,9 +142,16 @@ class MeetingPrepRepository(BaseRepository):
         """
         collection = await self._ensure_collection()
         record = await collection.find_one(
-            {"tenant_id": tenant_id, "recurring_meeting_id": recurring_meeting_id},
+            {"tenant_id": ObjectId(tenant_id), "recurring_meeting_id": recurring_meeting_id},
             {"_id": 0},
         )
+        
+        if record:
+            if "tenant_id" in record:
+                record["tenant_id"] = str(record["tenant_id"])
+            if "meeting_id" in record:
+                record["meeting_id"] = str(record["meeting_id"])
+        
         return record
 
     async def get_prep_packs_by_recurring_meeting_id(
@@ -154,11 +170,18 @@ class MeetingPrepRepository(BaseRepository):
         """
         collection = await self._ensure_collection()
         cursor = collection.find(
-            {"tenant_id": tenant_id, "recurring_meeting_id": recurring_meeting_id},
+            {"tenant_id": ObjectId(tenant_id), "recurring_meeting_id": recurring_meeting_id},
             {"_id": 0},
         ).sort("created_at", DESCENDING).limit(limit)
         
         records = await cursor.to_list(length=limit)
+        
+        for record in records:
+            if "tenant_id" in record:
+                record["tenant_id"] = str(record["tenant_id"])
+            if "meeting_id" in record:
+                record["meeting_id"] = str(record["meeting_id"])
+        
         return records
 
     async def delete_prep_pack(
@@ -176,7 +199,7 @@ class MeetingPrepRepository(BaseRepository):
         """
         collection = await self._ensure_collection()
         result = await collection.delete_one({
-            "tenant_id": tenant_id,
+            "tenant_id": ObjectId(tenant_id),
             "recurring_meeting_id": recurring_meeting_id,
         })
         

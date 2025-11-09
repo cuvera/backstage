@@ -126,7 +126,7 @@ class MeetingAnalysisOrchestrator:
                 transcript_payload=transcript_payload or {}
             )
 
-            meeting_analysis_service = MeetingAnalysisService()
+            meeting_analysis_service = await MeetingAnalysisService.from_default()
             await meeting_analysis_service.save_analysis(analysis_result)
 
             logger.info(f"Step 4: Generate meeting prepration suggestion")

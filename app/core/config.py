@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     AZURE_OPENAI_DEPLOYMENT_NAME: Optional[str] = Field(default=None, env="AZURE_OPENAI_DEPLOYMENT_NAME")
     
     GEMINI_API_KEY: Optional[str] = Field(default=None, env="GEMINI_API_KEY")
+
+    HUGGINGFACE_TOKEN: str = Field(default="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", env="HUGGINGFACE_TOKEN")
+    # For faster-whisper (e.g., "tiny", "base", "small", "medium", "large-v3")
+    WHISPER_MODEL_NAME: str = Field(default="base", env="WHISPER_MODEL_NAME")
     
     HOST: str = Field(default="0.0.0.0", env="HOST")
     PORT: int = Field(default=8000, env="PORT")

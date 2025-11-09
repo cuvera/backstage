@@ -82,8 +82,8 @@ async def test_service_functionality():
     try:
         from app.services.meeting_prep_curator_service import MeetingPrepCuratorService
         
-        # Test service creation (without DB connection)
-        service = MeetingPrepCuratorService()
+        # Test service creation (with repository initialization)
+        service = await MeetingPrepCuratorService.from_default()
         print("✓ Service created successfully")
         
         # Test that service has required methods
