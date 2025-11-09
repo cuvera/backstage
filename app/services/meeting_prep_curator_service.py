@@ -1,17 +1,12 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
-
-from audmath import db
-from motor.motor_asyncio import AsyncIOMotorCollection, AsyncIOMotorDatabase
-from pymongo import ASCENDING, DESCENDING
 
 from app.schemas.meeting_analysis import MeetingAnalysis, MeetingPrepPack
 from app.services.agents.meeting_prep_agent import MeetingPrepAgent, MeetingPrepAgentError
 from app.services.meeting_analysis_service import MeetingAnalysisService
-from bson.objectid import ObjectId
+from app.repository import MeetingPrepRepository
 from app.utils.meeting_metadata import (
     fetch_meeting_metadata,
     fetch_meetings_by_recurring_id,
@@ -29,56 +24,29 @@ class MeetingPrepCuratorServiceError(Exception):
 class MeetingPrepCuratorService:
     """
     Service layer for meeting preparation packs.
-    Orchestrates MeetingPrepAgent and provides MongoDB persistence.
+    Orchestrates MeetingPrepAgent and delegates data operations to repository.
     """
-
-    COLLECTION = "meeting_preparations"
 
     def __init__(
         self,
         *,
-        db: Optional[AsyncIOMotorDatabase] = None,
-        collection_name: str = COLLECTION,
+        repository: Optional[MeetingPrepRepository] = None,
+        analysis_service: Optional[MeetingAnalysisService] = None,
     ) -> None:
-        self._db = db
-        self._collection_name = collection_name
-        self._collection: Optional[AsyncIOMotorCollection] = None
+        self._repository = repository
         self._agent = MeetingPrepAgent()
-        self._analysis_service = MeetingAnalysisService(db=db)
+        self._analysis_service = analysis_service
 
     @classmethod
-    async def from_default(cls, collection_name: str = COLLECTION) -> "MeetingPrepCuratorService":
+    async def from_default(cls) -> "MeetingPrepCuratorService":
         from app.db.mongodb import get_database  # lazy import to avoid circular deps
 
         db = await get_database()
-        service = cls(db=db, collection_name=collection_name)
-        await service.ensure_indexes()
-        service._analysis_service = MeetingAnalysisService(db=db)
-        await service._analysis_service.ensure_indexes()
+        repository = await MeetingPrepRepository.from_default()
+        analysis_service = await MeetingAnalysisService.from_default()
+        
+        service = cls(repository=repository, analysis_service=analysis_service)
         return service
-
-    async def ensure_indexes(self) -> None:
-        """Create MongoDB indexes for optimal query performance."""
-        collection = await self._ensure_collection()
-        
-        # Unique index on tenant_id + recurring_meeting_id for upserts
-        await collection.create_index(
-            [("tenant_id", ASCENDING), ("recurring_meeting_id", ASCENDING)],
-            unique=True,
-            name="ux_tenant_recurring_meeting",
-        )
-        
-        # Index for fetching by tenant and meeting_id (for lookup by individual meeting)
-        await collection.create_index(
-            [("tenant_id", ASCENDING), ("meeting_id", ASCENDING)],
-            name="ix_tenant_meeting",
-        )
-        
-        # Index for time-based queries
-        await collection.create_index(
-            [("created_at", DESCENDING)],
-            name="ix_created_at",
-        )
 
     async def generate_and_save_prep_pack(
         self,
@@ -161,7 +129,7 @@ class MeetingPrepCuratorService:
             # Use next meeting ID if found, otherwise use current meeting_id
             target_meeting_id = next_meeting_id or meeting_id
             
-            # Save to MongoDB
+            # Save to MongoDB using repository
             save_result = await self.save_prep_pack(prep_pack, target_meeting_id)
             
             logger.info(
@@ -185,139 +153,50 @@ class MeetingPrepCuratorService:
             raise MeetingPrepCuratorServiceError(f"Unexpected error: {exc}") from exc
 
     async def save_prep_pack(self, prep_pack: MeetingPrepPack, meeting_id: str) -> Dict[str, Any]:
-        """
-        Save a meeting prep pack to MongoDB.
-        
-        Args:
-            prep_pack: The prep pack to save
-            meeting_id: The meeting ID this prep pack is for
-            
-        Returns:
-            Dictionary with save operation details
-        """
-        now = datetime.now(timezone.utc).isoformat()
-        doc: Dict[str, Any] = prep_pack.model_dump(exclude_none=True)
-        doc.setdefault("created_at", now)
-        doc["updated_at"] = now
-        doc["tenant_id"] = ObjectId(prep_pack.tenant_id)
-        doc["meeting_id"] = meeting_id  # Store the meeting this prep pack is for
-
-        collection = await self._ensure_collection()
-        key = {
-            "tenant_id": ObjectId(prep_pack.tenant_id),
-            "recurring_meeting_id": prep_pack.recurring_meeting_id,
-        }
-
-        logger.info(
-            "[MeetingPrepCuratorService] Upserting prep pack for tenant=%s recurring_meeting=%s",
-            prep_pack.tenant_id,
-            prep_pack.recurring_meeting_id,
-        )
-
-        result = await collection.update_one(key, {"$set": doc}, upsert=True)
-        stored = await collection.find_one(key, {"_id": 1})
-
-        mongo_id = stored.get("_id") if stored else result.upserted_id
-        return {
-            "document_id": str(mongo_id) if mongo_id else None,
-            "matched": result.matched_count,
-            "upserted": bool(result.upserted_id),
-            "collection": self._collection_name,
-        }
+        """Save a meeting prep pack using repository."""
+        if not self._repository:
+            raise RuntimeError("Repository not initialized")
+        return await self._repository.save_prep_pack(prep_pack, meeting_id)
 
     async def get_prep_pack_by_meeting_id(
         self, *, tenant_id: str, meeting_id: str
     ) -> Optional[Dict[str, Any]]:
-        """
-        Get a prep pack by meeting ID.
-        
-        Args:
-            tenant_id: Tenant identifier
-            meeting_id: Meeting identifier
-            
-        Returns:
-            Prep pack data or None if not found
-        """
-        collection = await self._ensure_collection()
-        record = await collection.find_one(
-            {"tenant_id": tenant_id, "meeting_id": meeting_id},
-            {"_id": 0},
+        """Get a prep pack by meeting ID using repository."""
+        if not self._repository:
+            raise RuntimeError("Repository not initialized")
+        return await self._repository.get_prep_pack_by_meeting_id(
+            tenant_id=tenant_id, meeting_id=meeting_id
         )
-        return record
 
     async def get_prep_pack_by_recurring_meeting_id(
         self, *, tenant_id: str, recurring_meeting_id: str
     ) -> Optional[Dict[str, Any]]:
-        """
-        Get the latest prep pack by recurring meeting ID.
-        
-        Args:
-            tenant_id: Tenant identifier
-            recurring_meeting_id: Recurring meeting identifier
-            
-        Returns:
-            Latest prep pack data or None if not found
-        """
-        collection = await self._ensure_collection()
-        record = await collection.find_one(
-            {"tenant_id": tenant_id, "recurring_meeting_id": recurring_meeting_id},
-            {"_id": 0},
+        """Get the latest prep pack by recurring meeting ID using repository."""
+        if not self._repository:
+            raise RuntimeError("Repository not initialized")
+        return await self._repository.get_prep_pack_by_recurring_meeting_id(
+            tenant_id=tenant_id, recurring_meeting_id=recurring_meeting_id
         )
-        return record
 
     async def get_prep_packs_by_recurring_meeting_id(
         self, *, tenant_id: str, recurring_meeting_id: str, limit: int = 10
     ) -> List[Dict[str, Any]]:
-        """
-        Get multiple prep packs for a recurring meeting series, ordered by creation date.
-        
-        Args:
-            tenant_id: Tenant identifier
-            recurring_meeting_id: Recurring meeting identifier
-            limit: Maximum number of prep packs to return
-            
-        Returns:
-            List of prep pack data ordered by created_at (newest first)
-        """
-        collection = await self._ensure_collection()
-        cursor = collection.find(
-            {"tenant_id": tenant_id, "recurring_meeting_id": recurring_meeting_id},
-            {"_id": 0},
-        ).sort("created_at", DESCENDING).limit(limit)
-        
-        records = await cursor.to_list(length=limit)
-        return records
+        """Get multiple prep packs for a recurring meeting series using repository."""
+        if not self._repository:
+            raise RuntimeError("Repository not initialized")
+        return await self._repository.get_prep_packs_by_recurring_meeting_id(
+            tenant_id=tenant_id, recurring_meeting_id=recurring_meeting_id, limit=limit
+        )
 
     async def delete_prep_pack(
         self, *, tenant_id: str, recurring_meeting_id: str
     ) -> Dict[str, Any]:
-        """
-        Delete a prep pack by tenant and recurring meeting ID.
-        
-        Args:
-            tenant_id: Tenant identifier
-            recurring_meeting_id: Recurring meeting identifier
-            
-        Returns:
-            Dictionary with deletion result
-        """
-        collection = await self._ensure_collection()
-        result = await collection.delete_one({
-            "tenant_id": tenant_id,
-            "recurring_meeting_id": recurring_meeting_id,
-        })
-        
-        logger.info(
-            "[MeetingPrepCuratorService] Deleted prep pack for tenant=%s recurring_meeting=%s, deleted_count=%d",
-            tenant_id,
-            recurring_meeting_id,
-            result.deleted_count,
+        """Delete a prep pack by tenant and recurring meeting ID using repository."""
+        if not self._repository:
+            raise RuntimeError("Repository not initialized")
+        return await self._repository.delete_prep_pack(
+            tenant_id=tenant_id, recurring_meeting_id=recurring_meeting_id
         )
-        
-        return {
-            "deleted_count": result.deleted_count,
-            "collection": self._collection_name,
-        }
 
     def _resolve_recurring_meeting_id(
         self, meeting_metadata: Optional[Dict[str, Any]], recurring_meeting_id: Optional[str] = None
@@ -354,12 +233,15 @@ class MeetingPrepCuratorService:
         # Only fetch from MongoDB for online platforms
         if platform != "offline" and platform == "google":
             logger.info("Fetching meeting metadata from MongoDB for platform=%s, meeting_id=%s", platform, meeting_id)
-            meeting_data = await fetch_meeting_metadata(meeting_id, self._db, platform)
-            
-            if meeting_data:
-                return meeting_data
-            
-            logger.warning("Failed to fetch meeting metadata from MongoDB, using placeholder data")
+            # Use repository's database connection
+            db = self._repository._db if self._repository else None
+            if db:
+                meeting_data = await fetch_meeting_metadata(meeting_id, db, platform)
+                
+                if meeting_data:
+                    return meeting_data
+                
+                logger.warning("Failed to fetch meeting metadata from MongoDB, using placeholder data")
         
         # Return None for offline or when MongoDB query fails
         return None
@@ -385,9 +267,15 @@ class MeetingPrepCuratorService:
         Returns:
             List of previous meeting data
         """        
+        # Use repository's database connection
+        db = self._repository._db if self._repository else None
+        if not db:
+            logger.warning("No database connection available for fetching previous meetings")
+            return []
+
         meetings_data = await fetch_meetings_by_recurring_id(
             recurring_meeting_id,
-            self._db,
+            db,
             platform=platform,
             limit=count,
             start=from_date,
@@ -478,64 +366,12 @@ class MeetingPrepCuratorService:
     ) -> Optional[str]:
         """
         Find the immediate next scheduled meeting after the current meeting ends.
-        
-        Args:
-            current_meeting_metadata: Already fetched current meeting data
-            recurring_meeting_id: Recurring meeting series ID
-            platform: Meeting platform
-            
-        Returns:
-            Next meeting ID or None
+        Delegates to repository method.
         """
-        if not current_meeting_metadata:
-            logger.warning("[MeetingPrepCuratorService] No current meeting metadata provided")
+        if not self._repository:
+            logger.warning("[MeetingPrepCuratorService] No repository available for finding next meeting")
             return None
         
-        # Extract end time from current meeting
-        current_end_time = (
-            current_meeting_metadata.get("end_time") or 
-            current_meeting_metadata.get("end")
+        return await self._repository.find_immediate_next_meeting(
+            current_meeting_metadata, recurring_meeting_id, platform
         )
-        
-        if not current_end_time:
-            logger.warning("[MeetingPrepCuratorService] Current meeting has no end time")
-            return None
-        
-        # Query next scheduled meeting
-        collection_name = PLATFORM_COLLECTIONS.get(platform, "google_meetings")
-        collection = self._db[collection_name]
-        
-        try:
-            query = {
-                "recurringEventId": recurring_meeting_id,
-                "status": "scheduled",
-                "start": {"$gte": current_end_time},
-                "eventId": {"$ne": current_meeting_metadata.get("id")}
-            }
-            
-            # Get immediate next meeting
-            cursor = collection.find(query, {"eventId": 1}).sort("start", 1).limit(1)
-            docs = await cursor.to_list(length=1)
-            
-            if docs:
-                print(f"Found next meeting: {docs}")
-                next_meeting_id = docs[0].get("_id")
-                logger.info("[MeetingPrepCuratorService] Found immediate next meeting: %s", next_meeting_id)
-                return next_meeting_id
-            
-            logger.info("[MeetingPrepCuratorService] No immediate next scheduled meeting found")
-            return None
-            
-        except Exception as exc:
-            logger.error("[MeetingPrepCuratorService] Error finding next meeting: %s", exc)
-            return None
-
-    async def _ensure_collection(self) -> AsyncIOMotorCollection:
-        """Ensure the MongoDB collection is available."""
-        if self._collection is None:
-            if self._db is None:
-                from app.db.mongodb import get_database
-
-                self._db = await get_database()
-            self._collection = self._db[self._collection_name]
-        return self._collection
