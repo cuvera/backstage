@@ -149,8 +149,7 @@ class MeetingAnalysisOrchestrator:
 
 async def save_transcription(meeting_id, tenant_id, vox_scribe_result):
     try:
-        transcription_service = TranscriptionService()
-        await transcription_service.ensure_indexes()
+        transcription_service = await TranscriptionService.from_default()
         
         transcription_result = await transcription_service.save_transcription(
             meeting_id=meeting_id,
