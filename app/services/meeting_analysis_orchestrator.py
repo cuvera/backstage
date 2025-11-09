@@ -25,6 +25,8 @@ from app.services.vox_scribe.quadrant_service import Quadrant_service
 from app.services.vox_scribe.transcription_diarization_service import TranscriptionDiarizationService
 from app.services.vox_scribe.speaker_assignment_service import SpeakerAssignmentService
 from app.services.vox_scribe.main_pipeline import diarization_pipeline
+from app.services.vox_scribe.transcription_pipeline import transcription_with_timeframes, validate_speaker_timeframes
+from app.utils.meeting_metadata import fetch_google_meeting_timeframes
 from app.services.meeting_analysis_service import MeetingAnalysisService
 from app.utils.s3_client import download_s3_file
 from app.services.meeting_prep_curator_service import MeetingPrepCuratorService
@@ -99,13 +101,46 @@ class MeetingAnalysisOrchestrator:
                     'temp_directory': temp_dir
                 }
             
-            # Step 2: Process with vox_scribe pipeline
+            # Step 2: Process with vox_scribe pipeline (platform-specific)
             logger.info("Step 2: Processing with vox_scribe pipeline")
             logger.info(f"Step 2: {file_url}")
-            vox_scribe_result = diarization_pipeline(
-                meeting_audio_path=file_url,
-                known_number_of_speakers=0
-            )
+            
+            if platform == "google":
+                # For Google meetings, use transcription with pre-identified speaker timeframes
+                logger.info("Using Google meeting transcription with timeframes")
+                
+                # Get database connection to fetch speaker timeframes
+                from app.db.mongodb import get_database
+                db = await get_database()
+                speaker_timeframes = await fetch_google_meeting_timeframes(meeting_id, db)
+                
+                if speaker_timeframes and validate_speaker_timeframes(speaker_timeframes):
+                    logger.info(f"Found {len(speaker_timeframes)} speaker timeframes for Google meeting")
+                    vox_scribe_result = transcription_with_timeframes(
+                        meeting_audio_path=file_url,
+                        speaker_timeframes=speaker_timeframes
+                    )
+                    
+                    # Check if transcription with timeframes produced any results
+                    if not vox_scribe_result or len(vox_scribe_result) == 0:
+                        logger.warning("Google timeframe transcription produced no results, falling back to diarization")
+                        vox_scribe_result = diarization_pipeline(
+                            meeting_audio_path=file_url,
+                            known_number_of_speakers=0
+                        )
+                else:
+                    logger.warning("No valid speaker timeframes found, falling back to diarization")
+                    vox_scribe_result = diarization_pipeline(
+                        meeting_audio_path=file_url,
+                        known_number_of_speakers=0
+                    )
+            else:
+                # For non-Google platforms, use existing diarization pipeline
+                logger.info(f"Using diarization pipeline for platform: {platform}")
+                vox_scribe_result = diarization_pipeline(
+                    meeting_audio_path=file_url,
+                    known_number_of_speakers=0
+                )
 
             if (len(vox_scribe_result) > 0):
                 await save_transcription(meeting_id, tenant_id, vox_scribe_result)
