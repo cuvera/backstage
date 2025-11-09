@@ -18,6 +18,47 @@ PLATFORM_COLLECTIONS = {
     "google": "google_meetings",
 }
 
+
+async def fetch_google_meeting_timeframes(
+    meeting_id: str,
+    db: AsyncIOMotorDatabase
+) -> Optional[List[Dict[str, Any]]]:
+    """
+    Fetch speaker timeframes from Google meeting document.
+    
+    Args:
+        meeting_id: Meeting identifier (_id or eventId)
+        db: MongoDB database connection
+        
+    Returns:
+        List of speaker timeframes or None if not found
+        Format: [{"speakerName": "Name", "start": ms, "end": ms}, ...]
+    """
+    try:
+        collection_name = PLATFORM_COLLECTIONS["google"]
+        collection = db[collection_name]
+        
+        # Try to find by _id first (ObjectId)
+        query = {"_id": ObjectId(meeting_id)}
+        meeting_doc = await collection.find_one(query)
+        
+        # If not found, try by eventId (string)
+        if not meeting_doc:
+            query = {"eventId": meeting_id}
+            meeting_doc = await collection.find_one(query)
+        
+        if meeting_doc:
+            speaker_timeframes = meeting_doc.get("speakerTimeframes", [])
+            logger.info(f"Found {len(speaker_timeframes)} speaker timeframes for meeting {meeting_id}")
+            return speaker_timeframes
+        else:
+            logger.warning(f"Google meeting not found for ID: {meeting_id}")
+            return None
+            
+    except Exception as exc:
+        logger.error(f"Error fetching Google meeting timeframes for {meeting_id}: {exc}")
+        return None
+
 async def fetch_meeting_metadata(
     meeting_id: str, 
     db: AsyncIOMotorDatabase,
