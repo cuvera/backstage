@@ -53,14 +53,14 @@ class PreviousMeeting(BaseModel):
     """Previous meeting data structure for prep pack generation."""
     id: str
     recurring_meeting_id: str
-    datetime: datetime
+    datetime: str | datetime
     session_id: str
 
 
 def google_meeting_to_metadata(doc: Dict[str, Any]) -> MeetingMetadata:
     """Convert Google meeting MongoDB document to standardized metadata."""
     return MeetingMetadata(
-        id=doc.get("eventId"),
+        id=str(doc.get("_id")),
         tenant_id=doc.get("tenantId"),
         recurring_meeting_id=doc.get("recurringEventId"),
         summary=doc.get("summary", ""),
@@ -81,8 +81,8 @@ def google_meeting_to_metadata(doc: Dict[str, Any]) -> MeetingMetadata:
 def google_meeting_to_previous_meeting(doc: Dict[str, Any]) -> PreviousMeeting:
     """Convert Google meeting MongoDB document to previous meeting structure."""
     return PreviousMeeting(
-        id=doc.get("eventId"),
+        id=str(doc.get("_id")),
         recurring_meeting_id=doc.get("recurringEventId", ""),
-        datetime=doc.get("start"),
+        datetime=str(doc.get("start")),
         session_id=doc.get("eventId")  # Using eventId as session_id for now
     )

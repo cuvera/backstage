@@ -5,15 +5,14 @@ from faster_whisper import WhisperModel
 from pyannote.audio import Pipeline
 from typing import List, Dict, Any
 import json
-
-load_dotenv()
+from app.core.config import settings
 
 class TranscriptionDiarizationService:
     """Handles transcription and speaker diarization."""
 
     def __init__(self):
-        self.HF_TOKEN = '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'
-        self.WHISPER_MODEL_NAME = os.getenv("WHISPER_MODEL_NAME", "base")
+        self.HF_TOKEN = settings.HUGGINGFACE_TOKEN
+        self.WHISPER_MODEL_NAME = settings.WHISPER_MODEL_NAME or "base"
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print(f"Using device: {self.device}")
 
@@ -25,7 +24,7 @@ class TranscriptionDiarizationService:
             self.diarization_pipeline = Pipeline.from_pretrained(
                 "pyannote/speaker-diarization-community-1",
                 # "pyannote/speaker-diarization-3.1",
-                token='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'
+                token=self.HF_TOKEN
             ).to(self.device)
             print("✅ Transcription and Diarization models loaded.")
         except Exception as e:
