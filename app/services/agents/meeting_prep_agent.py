@@ -172,12 +172,10 @@ class MeetingPrepAgent:
             "owner": "email"
             }}
         ],
-        "key_points": [],
-        "open_questions": [],
-        "risks_issues": [],
-        "leadership_asks": [
-            "string"
-        ]
+        "key_points": ["string"],
+        "open_questions": ["string"],
+        "risks_issues": ["string"],
+        "leadership_asks": ["string"]
         }}
 
         MEETING INFORMATION:
