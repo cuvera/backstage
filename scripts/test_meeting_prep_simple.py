@@ -34,7 +34,7 @@ async def test_meeting_prep_simple():
         
         # Import here to avoid SSL issues during import
         from motor.motor_asyncio import AsyncIOMotorClient
-        from app.services.meeting_prep_service import MeetingPrepService
+        from app.services.meeting_prep_curator_service import MeetingPrepCuratorService
         from app.core.config import settings
         
         # Create MongoDB client with SSL verification disabled for testing
@@ -56,15 +56,15 @@ async def test_meeting_prep_simple():
         await db.list_collection_names()
         logger.info("✅ Connected to MongoDB successfully")
         
-        # Create MeetingPrepService manually without index creation
-        logger.info("Creating MeetingPrepService...")
-        prep_service = MeetingPrepService(db=db)
+        # Create MeetingPrepCuratorService manually without index creation
+        logger.info("Creating MeetingPrepCuratorService...")
+        prep_service = MeetingPrepCuratorService(db=db)
         
         # Initialize analysis service
         from app.services.meeting_analysis_service import MeetingAnalysisService
         prep_service._analysis_service = MeetingAnalysisService(db=db)
         
-        logger.info("✅ MeetingPrepService created successfully")
+        logger.info("✅ MeetingPrepCuratorService created successfully")
         
         # Test the prep pack generation
         logger.info("Generating prep pack...")
