@@ -17,6 +17,9 @@ from app.db.mongodb import connect_to_mongo, close_mongo_connection
 from app.messaging.consumer import RabbitMQConsumerManager
 from app.messaging.producer import producer
 from app.services.jobs.daily_dept_painpoints import run_daily_department_painpoints_job
+from scripts.test_meeting_prep import quick_test
+from app.services.meeting_analysis_orchestrator import MeetingAnalysisOrchestrator
+from app.core.openai_client import llm_client, httpx_client
 
 consumer_manager = RabbitMQConsumerManager()
 scheduler: AsyncIOScheduler | None = None
@@ -31,6 +34,10 @@ async def lifespan(_: FastAPI):
         await connect_to_mongo()
         await producer.connect()
         await consumer_manager.start()
+
+        app.state.llm_client = llm_client
+        app.state.httpx_client = httpx_client
+
         global scheduler
         scheduler = AsyncIOScheduler(timezone="UTC")
         cron_expression = settings.PAINPOINT_CRON_EXPRESSION
@@ -98,8 +105,41 @@ async def http_exception_handler(_: Request, exc: HTTPException):
     return JSONResponse(status_code=exc.status_code, content={"message": exc.detail})
 
 
+import json
 @app.get("/")
 async def root():
+    print("Quick test")
+    # await quick_test()
+    orc = MeetingAnalysisOrchestrator()
+    
+    # payload = {
+    #     "_id": "69034a94bd25edb427558ce0",
+    #     "tenantId": "689ddc0411e4209395942bee",
+    #     "platform": "google",
+    #     "bucket": "cuverademo",
+    #     "fileUrl": "689ddc0411e4209395942bee/google/6isa8pcg77vet5m2qkgpltc0t5/Cuvera Bot-2025-10-30T11:29:54.532Z.wav"
+    # }
+
+    payload = {
+        "_id": "690ddf0412abd9e67f3d0f8a",
+        "tenantId": "689ddc0411e4209395942bee",
+        "platform": "google",
+        "bucket": "cuverademo",
+        "fileUrl": "689ddc0411e4209395942bee/google/2v8piks0c5s2m80o2pjnubhq9k/Cuvera Bot-2025-11-07T12:03:16.016Z.wav"
+    }
+
+    payload_dict = json.loads(json.dumps(payload))
+
+    await orc.analyze_meeting(payload_dict)
+
+    # payload = {
+    #     "_id": "68c7b828f3f92a7f537b536d",
+    #     "tenantId": "689ddc0411e4209395942bee",
+    #     "platform": "google",
+    #     "bucket": "cuverademo",
+    #     "fileUrl": "/689ddc0411e4209395942bee/google/6isa8pcg77vet5m2qkgpltc0t5/Cuvera Bot-2025-10-30T11:29:54.532Z.wav"
+    # })
+
     return {"message": "Cognitive Service"}
 
 
@@ -114,5 +154,4 @@ async def health():
 
 if __name__ == "__main__":
     import uvicorn
-
     uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
