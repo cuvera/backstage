@@ -6,13 +6,8 @@ from typing import Any, Dict, List, Optional
 from app.schemas.meeting_analysis import MeetingAnalysis, MeetingPrepPack
 from app.services.agents.meeting_prep_agent import MeetingPrepAgent, MeetingPrepAgentError
 from app.services.meeting_analysis_service import MeetingAnalysisService
-from app.repository import MeetingPrepRepository
-from app.utils.meeting_metadata import (
-    fetch_meeting_metadata,
-    fetch_meetings_by_recurring_id,
-    extract_recurring_meeting_id,
-    PLATFORM_COLLECTIONS,
-)
+from app.repository import MeetingPrepRepository, MeetingMetadataRepository
+from app.utils.meeting_metadata import extract_recurring_meeting_id
 
 logger = logging.getLogger(__name__)
 
@@ -32,20 +27,24 @@ class MeetingPrepCuratorService:
         *,
         repository: Optional[MeetingPrepRepository] = None,
         analysis_service: Optional[MeetingAnalysisService] = None,
+        metadata_repository: Optional[MeetingMetadataRepository] = None,
     ) -> None:
         self._repository = repository
         self._agent = MeetingPrepAgent()
         self._analysis_service = analysis_service
+        self._metadata_repository = metadata_repository
 
     @classmethod
     async def from_default(cls) -> "MeetingPrepCuratorService":
-        from app.db.mongodb import get_database  # lazy import to avoid circular deps
-
-        db = await get_database()
         repository = await MeetingPrepRepository.from_default()
         analysis_service = await MeetingAnalysisService.from_default()
+        metadata_repository = await MeetingMetadataRepository.from_default()
         
-        service = cls(repository=repository, analysis_service=analysis_service)
+        service = cls(
+            repository=repository, 
+            analysis_service=analysis_service,
+            metadata_repository=metadata_repository
+        )
         return service
 
     async def generate_and_save_prep_pack(
@@ -221,7 +220,7 @@ class MeetingPrepCuratorService:
 
     async def _get_meeting_metadata(self, meeting_id: str, platform: str) -> Dict[str, Any]:
         """
-        Fetch meeting metadata from MongoDB collection.
+        Fetch meeting metadata using repository.
         
         Args:
             meeting_id: Individual meeting identifier
@@ -233,10 +232,9 @@ class MeetingPrepCuratorService:
         # Only fetch from MongoDB for online platforms
         if platform != "offline" and platform == "google":
             logger.info("Fetching meeting metadata from MongoDB for platform=%s, meeting_id=%s", platform, meeting_id)
-            # Use repository's database connection
-            db = self._repository._db if self._repository else None
-            if db is not None:
-                meeting_data = await fetch_meeting_metadata(meeting_id, db, platform)
+            
+            if self._metadata_repository:
+                meeting_data = await self._metadata_repository.get_meeting_metadata(meeting_id, platform)
                 
                 if meeting_data:
                     return meeting_data
@@ -267,15 +265,12 @@ class MeetingPrepCuratorService:
         Returns:
             List of previous meeting data
         """        
-        # Use repository's database connection
-        db = self._repository._db if self._repository else None
-        if db is None:
-            logger.warning("No database connection available for fetching previous meetings")
+        if not self._metadata_repository:
+            logger.warning("No metadata repository available for fetching previous meetings")
             return []
 
-        meetings_data = await fetch_meetings_by_recurring_id(
+        meetings_data = await self._metadata_repository.get_meetings_by_recurring_id(
             recurring_meeting_id,
-            db,
             platform=platform,
             limit=count,
             start=from_date,
@@ -366,12 +361,12 @@ class MeetingPrepCuratorService:
     ) -> Optional[str]:
         """
         Find the immediate next scheduled meeting after the current meeting ends.
-        Delegates to repository method.
+        Delegates to metadata repository method.
         """
-        if not self._repository:
-            logger.warning("[MeetingPrepCuratorService] No repository available for finding next meeting")
+        if not self._metadata_repository:
+            logger.warning("[MeetingPrepCuratorService] No metadata repository available for finding next meeting")
             return None
         
-        return await self._repository.find_immediate_next_meeting(
+        return await self._metadata_repository.find_immediate_next_meeting(
             current_meeting_metadata, recurring_meeting_id, platform
         )
