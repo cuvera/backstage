@@ -15,7 +15,7 @@ async def get_database():
 
 async def connect_to_mongo():
     logger.info("Connecting to MongoDB...")
-    db.client = AsyncIOMotorClient(settings.MONGODB_URL)
+    db.client = AsyncIOMotorClient(settings.MONGODB_URL, tlsAllowInvalidCertificates=True)
     db.database = db.client[settings.DATABASE_NAME]
     logger.info("Connected to MongoDB")
 
