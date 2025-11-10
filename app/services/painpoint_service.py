@@ -140,3 +140,4 @@ class PainPointsService:
             doc["_id"] = str(res.inserted_id)
             logger.info("[PainPointsService] Inserted after retry _id=%s", str(res.inserted_id))
             return doc
+

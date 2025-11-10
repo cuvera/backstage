@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 class PainPointCanonicalAgent:
     """
     Uses the configured LLM to canonicalise a pain-point record so that
-    downstream aggregations can deduplicate similar issues.
+    downstream aggregations can deduplicate similar issues.ok
     """
 
     def __init__(self, llm=None):
