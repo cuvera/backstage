@@ -26,8 +26,8 @@ from app.services.vox_scribe.transcription_diarization_service import Transcript
 from app.services.vox_scribe.speaker_assignment_service import SpeakerAssignmentService
 from app.services.vox_scribe.main_pipeline import diarization_pipeline
 from app.services.vox_scribe.transcription_pipeline import transcription_with_timeframes, validate_speaker_timeframes
-from app.utils.meeting_metadata import fetch_google_meeting_timeframes
 from app.services.meeting_analysis_service import MeetingAnalysisService
+from app.repository import MeetingMetadataRepository
 from app.utils.s3_client import download_s3_file
 from app.services.meeting_prep_curator_service import MeetingPrepCuratorService
 
@@ -50,6 +50,7 @@ class MeetingAnalysisOrchestrator:
         self.qdrant_service = Quadrant_service()
         self.td_service = TranscriptionDiarizationService()
         self.assignment_service = SpeakerAssignmentService(self.qdrant_service)
+        self.meeting_metadata_repo = None  # Will be initialized when needed
     
     async def analyze_meeting(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -76,6 +77,9 @@ class MeetingAnalysisOrchestrator:
             
             if not all([meeting_id, tenant_id]):
                 raise MeetingAnalysisOrchestratorError("Missing required fields in payload: _id, tenantId, or fileUrl")
+            
+            # Update meeting status to pending at start of processing
+            await self._update_meeting_status(meeting_id, platform, 'pending')
             
             # Step 1: Merge audio files from S3
             logger.info("Step 1: Merging audio files from S3")
@@ -109,10 +113,11 @@ class MeetingAnalysisOrchestrator:
                 # For Google meetings, use transcription with pre-identified speaker timeframes
                 logger.info("Using Google meeting transcription with timeframes")
                 
-                # Get database connection to fetch speaker timeframes
-                from app.db.mongodb import get_database
-                db = await get_database()
-                speaker_timeframes = await fetch_google_meeting_timeframes(meeting_id, db)
+                # Initialize repository if needed and fetch speaker timeframes
+                if not self.meeting_metadata_repo:
+                    self.meeting_metadata_repo = await MeetingMetadataRepository.from_default()
+                
+                speaker_timeframes = await self.meeting_metadata_repo.get_speaker_timeframes(meeting_id)
                 
                 if speaker_timeframes and validate_speaker_timeframes(speaker_timeframes):
                     logger.info(f"Found {len(speaker_timeframes)} speaker timeframes for Google meeting")
@@ -176,11 +181,36 @@ class MeetingAnalysisOrchestrator:
             merge_result["prep_pack"] = prep_pack
             merge_result["success"] = True
             merge_result["meeting_id"] = meeting_id
+            
+            # Update meeting status to completed on success
+            await self._update_meeting_status(meeting_id, platform, 'completed')
+            
             return merge_result
 
         except Exception as e:
             logger.error(f"Meeting processing failed for meeting {payload.get('_id', 'unknown')}: {str(e)}")
+            
+            # Update meeting status to failed on error
+            meeting_id = payload.get('_id')
+            platform = payload.get('platform')
+            if meeting_id and platform:
+                await self._update_meeting_status(str(meeting_id), platform, 'failed')
+            
             raise MeetingAnalysisOrchestratorError(f"Meeting processing failed: {str(e)}") from e
+
+    async def _update_meeting_status(self, meeting_id: str, platform: str, status: str) -> None:
+        """Update meeting status in metadata repository for supported platforms."""
+        try:
+            if platform == "google":
+                if not self.meeting_metadata_repo:
+                    self.meeting_metadata_repo = await MeetingMetadataRepository.from_default()
+                
+                await self.meeting_metadata_repo.update_meeting_status(meeting_id, platform, status)
+                logger.info(f"Updated meeting {meeting_id} status to {status} for platform {platform}")
+            else:
+                logger.info(f"Status update not supported for platform {platform}, meeting {meeting_id} would be {status}")
+        except Exception as e:
+            logger.warning(f"Failed to update meeting status to {status} for meeting {meeting_id}: {e}")
 
 async def save_transcription(meeting_id, tenant_id, vox_scribe_result):
     try:
