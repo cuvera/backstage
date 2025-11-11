@@ -80,7 +80,7 @@ class MeetingAnalysisOrchestrator:
                 raise MeetingAnalysisOrchestratorError("Missing required fields in payload: _id, tenantId, or fileUrl")
             
             # Update meeting status to pending at start of processing
-            await self._update_meeting_status(meeting_id, platform, 'analyzing')
+            await self._update_meeting_status(meeting_id, platform, 'analysing')
             
             # Step 1: Merge audio files from S3
             logger.info("Step 1: Merging audio files from S3")
