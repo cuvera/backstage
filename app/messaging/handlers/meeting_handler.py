@@ -1,8 +1,10 @@
+import asyncio
 import json
 import logging
 from typing import Any, Dict
 
 from aio_pika.abc import AbstractIncomingMessage
+from aiormq.exceptions import ChannelInvalidStateError
 
 from app.services.meeting_analysis_orchestrator import (
     MeetingAnalysisOrchestrator,
@@ -13,14 +15,81 @@ from app.services.meeting_analysis_orchestrator import (
 logger = logging.getLogger(__name__)
 
 
+async def _safe_ack(message: AbstractIncomingMessage) -> bool:
+    """
+    Safely acknowledge a message, handling channel invalid state errors.
+    
+    Returns:
+        True if acknowledgment was successful, False if channel is invalid
+    """
+    try:
+        await message.ack()
+        return True
+    except ChannelInvalidStateError:
+        logger.warning("Cannot acknowledge message - channel is invalid (connection likely closed)")
+        return False
+
+
+async def _safe_reject(message: AbstractIncomingMessage, requeue: bool = False) -> bool:
+    """
+    Safely reject a message, handling channel invalid state errors.
+    
+    Returns:
+        True if rejection was successful, False if channel is invalid
+    """
+    try:
+        await message.reject(requeue=requeue)
+        return True
+    except ChannelInvalidStateError:
+        logger.warning("Cannot reject message - channel is invalid (connection likely closed)")
+        return False
+
+
+async def _process_meeting_async(payload: Dict[str, Any]) -> None:
+    """
+    Process meeting asynchronously without holding the message.
+    This prevents timeout issues by allowing early acknowledgment.
+    """
+    processing_service = None
+    try:
+        logger.info(f"Starting background processing for meeting {payload.get('_id', 'unknown')}")
+        
+        # Initialize processing service
+        processing_service = MeetingAnalysisOrchestrator()
+        
+        # Process the meeting
+        result = await processing_service.analyze_meeting(payload)
+        
+        if result["success"]:
+            logger.info(f"Background processing completed successfully for meeting {result['meeting_id']}")
+        else:
+            logger.error(f"Background processing failed for meeting: {result.get('error')}")
+            
+    except MeetingAlreadyProcessedException as e:
+        logger.info(f"Meeting already processed or being processed: {e}")
+        
+    except MeetingAnalysisOrchestratorError as e:
+        logger.error(f"Meeting processing service error: {e}")
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in background meeting processing: {e}", exc_info=True)
+    
+    finally:
+        # Cleanup processing service if it was created
+        if processing_service and hasattr(processing_service, 'transcription_service'):
+            try:
+                await processing_service.transcription_service.cleanup()
+            except Exception as cleanup_error:
+                logger.warning(f"Failed to cleanup processing service: {cleanup_error}")
+
+
 async def meeting_handler(message: AbstractIncomingMessage) -> None:
     """
     Handle meeting recording events from RabbitMQ.
     
-    This handler processes meeting recording events and triggers the complete
-    processing pipeline including audio merging, transcription, and analysis.
+    This handler validates and acknowledges messages quickly, then processes them
+    asynchronously to prevent timeout issues.
     """
-    processing_service = None
     try:
         logger.info("Received meeting processing message")
         
@@ -31,63 +100,32 @@ async def meeting_handler(message: AbstractIncomingMessage) -> None:
             logger.info(f"Parsed meeting event data: {event_data.get('metadata', {}).get('eventType', 'Unknown')}")
         except (UnicodeDecodeError, json.JSONDecodeError) as e:
             logger.error(f"Failed to parse message body: {e}")
-            await message.reject(requeue=False)  # Don't requeue malformed messages
+            await _safe_reject(message, requeue=False)  # Don't requeue malformed messages
             return
         
         # Validate basic message structure
         if not _validate_message_structure(event_data):
             logger.error("Invalid message structure")
-            await message.reject(requeue=False)
+            await _safe_reject(message, requeue=False)
             return
         
-        # Initialize processing service
-        processing_service = MeetingAnalysisOrchestrator()
+        # Extract payload for processing
+        payload = event_data.get('payload', {})
+        meeting_id = payload.get('_id', 'unknown')
         
-        # Process the meeting event directly with raw payload
-        try:
-            payload = event_data.get('payload', {})
-            result = await processing_service.analyze_meeting(payload)
-            
-            if result["success"]:
-                logger.info(f"Successfully processed meeting {result['meeting_id']}")
-                await message.ack()
-            else:
-                logger.error(f"Meeting processing failed: {result.get('error')}")
-                await message.reject(requeue=False)  # Requeue for retry
-                
-        except MeetingAlreadyProcessedException as e:
-            logger.info(f"Meeting already processed or being processed: {e}")
-            await message.ack()  # Acknowledge message as successfully handled
-            
-        except MeetingAnalysisOrchestratorError as e:
-            logger.error(f"Meeting processing service error: {e}")
-            
-            # Check if this is a retryable error
-            if _is_retryable_error(e):
-                logger.info("Error is retryable, requeuing message")
-                await message.reject(requeue=False)
-            else:
-                logger.info("Error is not retryable, rejecting message")
-                await message.reject(requeue=False)
-                
-        except Exception as e:
-            logger.error(f"Unexpected error in meeting processing: {e}", exc_info=True)
-            await message.reject(requeue=False)  # Requeue unexpected errors for retry
-    
+        # Acknowledge message immediately after validation to prevent timeout
+        ack_success = await _safe_ack(message)
+        if ack_success:
+            logger.info(f"Acknowledged message for meeting {meeting_id}, starting background processing")
+        else:
+            logger.warning(f"Failed to acknowledge message for meeting {meeting_id}, but continuing with processing")
+        
+        # Start background processing without waiting for completion
+        asyncio.create_task(_process_meeting_async(payload))
+        
     except Exception as e:
         logger.error(f"Critical error in meeting handler: {e}", exc_info=True)
-        try:
-            await message.reject(requeue=False)  # Don't requeue critical handler errors
-        except Exception as reject_error:
-            logger.error(f"Failed to reject message: {reject_error}")
-    
-    finally:
-        # Cleanup processing service if it was created
-        if processing_service and hasattr(processing_service, 'transcription_service'):
-            try:
-                await processing_service.transcription_service.cleanup()
-            except Exception as cleanup_error:
-                logger.warning(f"Failed to cleanup processing service: {cleanup_error}")
+        await _safe_reject(message, requeue=False)  # Don't requeue critical handler errors
 
 
 def _validate_message_structure(event_data: Dict[str, Any]) -> bool:
