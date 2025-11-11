@@ -24,7 +24,6 @@ from app.core.openai_client import llm_client, httpx_client
 consumer_manager = RabbitMQConsumerManager()
 scheduler: AsyncIOScheduler | None = None
 
-
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     setup_logging()
