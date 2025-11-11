@@ -74,6 +74,7 @@ class MeetingAnalysisOrchestrator:
             tenant_id = payload.get('tenantId')
             platform = payload.get('platform')
             bucket = payload.get('bucket', 'recordings')
+            recurring_meeting_id = payload.get('recurring_meeting_id')
             
             if not all([meeting_id, tenant_id]):
                 raise MeetingAnalysisOrchestratorError("Missing required fields in payload: _id, tenantId, or fileUrl")
@@ -170,12 +171,16 @@ class MeetingAnalysisOrchestrator:
             await meeting_analysis_service.save_analysis(analysis_result)
 
             logger.info(f"Step 4: Generate meeting prepration suggestion")
-            meeting_prep_service = await MeetingPrepCuratorService.from_default()
-            prep_pack = await meeting_prep_service.generate_and_save_prep_pack(
-                meeting_id=meeting_id,
-                meeting_analysis=analysis_result,
-                platform=platform
-            )
+            prep_pack = None
+            if recurring_meeting_id:
+                meeting_prep_service = await MeetingPrepCuratorService.from_default()
+                prep_pack = await meeting_prep_service.generate_and_save_prep_pack(
+                    meeting_id=meeting_id,
+                    meeting_analysis=analysis_result,
+                    platform=platform
+                )
+            else:
+                logger.info("Skipping meeting preparation - no recurring_meeting_id provided")
 
             merge_result["analysis"] = analysis_result
             merge_result["prep_pack"] = prep_pack
