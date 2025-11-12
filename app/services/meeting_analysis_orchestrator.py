@@ -4,12 +4,15 @@ import logging
 import os
 import tempfile
 import shutil
+import uuid
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 from pathlib import Path
 import json
 import base64
 from openai import OpenAI
+from bson import ObjectId
+from datetime import datetime
 from app.db.mongodb import get_database
 from bson import ObjectId
 from app.models.meeting import (
@@ -24,6 +27,8 @@ from app.services.transcription_service import TranscriptionService
 from app.utils.audio_merger import merge_wav_files_from_s3, AudioMergerError
 from app.services.meeting_analysis_service import MeetingAnalysisService
 from app.repository import MeetingMetadataRepository
+from app.repository.meeting_prep_repository import MeetingPrepRepository
+from app.schemas.meeting_analysis import MeetingPrepPack
 from app.utils.s3_client import download_s3_file
 
 logger = logging.getLogger(__name__)
@@ -36,6 +41,42 @@ class MeetingAnalysisOrchestratorError(Exception):
 class MeetingAlreadyProcessedException(Exception):
     """Exception raised when meeting is already processed or being processed."""
     pass
+
+def clean_prep_pack_data(prep_result: Dict[str, Any]) -> Dict[str, Any]:
+    """Clean and validate prep pack data before creating MeetingPrepPack."""
+    
+    # Filter blocking items with valid eta
+    blocking_items = []
+    for item in prep_result.get("blocking_items", []):
+        if isinstance(item, dict):
+            # Convert None eta to empty string, or filter out if preferred
+            if item.get("eta") is None:
+                item["eta"] = ""
+            blocking_items.append(item)
+    
+    # Filter/fix decision queue items with valid id
+    decision_queue = []
+    for item in prep_result.get("decision_queue", []):
+        if isinstance(item, dict):
+            # Generate ID if missing or empty
+            if not item.get("id") or item.get("id") == "":
+                item["id"] = f"decision_{uuid.uuid4().hex[:8]}"
+            decision_queue.append(item)
+    
+    return {
+        "title": prep_result.get("title", "Meeting Preparation"),
+        "purpose": prep_result.get("purpose", ""),
+        "confidence": prep_result.get("confidence", "medium"),
+        "expected_outcomes": prep_result.get("expected_outcomes", []),
+        "blocking_items": blocking_items,
+        "decision_queue": decision_queue,
+        "key_points": prep_result.get("key_points", []),
+        "open_questions": prep_result.get("open_questions", []),
+        "risks_issues": prep_result.get("risks_issues", []),
+        "leadership_asks": prep_result.get("leadership_asks", []),
+        "previous_meetings_ref": prep_result.get("previous_meetings_ref", []),
+    }
+
 
 class GeminiService:
     """Service for interacting with Gemini 2.5 Flash via OpenAI compatible API."""
@@ -369,16 +410,39 @@ class MeetingAnalysisOrchestrator:
                 "platform": platform,
                 "speakerTimeframes": []
             }
+
+            next_meeting = None
             
             # Get speaker timeframes for Google meetings
             if platform == "google":
                 if not self.meeting_metadata_repo:
                     self.meeting_metadata_repo = await MeetingMetadataRepository.from_default()
                 
-                speaker_timeframes = await self.meeting_metadata_repo.get_speaker_timeframes(meeting_id)
-                if speaker_timeframes:
+                meeting_metadata = await self.meeting_metadata_repo.get_meeting_metadata(meeting_id)
+                # print the data from meeting_metadata
+                print(meeting_metadata.get("speaker_timeframes", []))
+                print(meeting_metadata.get("recurring_meeting_id", None))
+                print(meeting_metadata.get("start_time", None))
+
+                if meeting_metadata:
+                    speaker_timeframes = meeting_metadata.get("speaker_timeframes", [])
                     meeting_info["speakerTimeframes"] = speaker_timeframes
+                    recurring_meeting_id = meeting_metadata.get('recurring_meeting_id', None)
+                    meeting_info['recurring_meeting_id'] = recurring_meeting_id
                     logger.info(f"Found {len(speaker_timeframes)} speaker timeframes for Google meeting")
+
+                    if recurring_meeting_id:
+                        # fetch immediate next meeting from recurring_meeting_id
+                        next_meeting = await self.meeting_metadata_repo.find_immediate_next_meeting(
+                            current_meeting_metadata=meeting_metadata,
+                            recurring_meeting_id=recurring_meeting_id,
+                            platform="google"
+                        )
+
+                        if next_meeting:
+                            print("next meeting found: ", next_meeting)
+                            # update meeting status
+                            await self._update_meeting_status(next_meeting, platform, 'analysing')
             
             # Step 3: Analyze with Gemini
             logger.info("Step 3: Analyzing meeting with Gemini 2.5 Flash")
@@ -420,22 +484,36 @@ class MeetingAnalysisOrchestrator:
             prep_pack = None
             prep_result = gemini_result.get('meeting_preparation', {})
             
-            if recurring_meeting_id and prep_result:
-                # Add required fields for compatibility
-                prep_result.update({
-                    "meeting_id": meeting_id,
-                    "recurring_meeting_id": recurring_meeting_id,
-                    "tenant_id": tenant_id,
-                    "platform": platform,
-                    "created_at": datetime.now(timezone.utc).isoformat()
-                })
+            print("recurring_meeting_id: ", recurring_meeting_id)
+            print("next_meeting: ", next_meeting)
+            print("prep_result: ", prep_result)
+
+            if recurring_meeting_id and next_meeting and prep_result:
+                # Clean and validate prep pack data
+                cleaned_prep_data = clean_prep_pack_data(prep_result)
                 
-                meeting_prep_service = await MeetingPrepCuratorService.from_default()
-                prep_pack = await meeting_prep_service.generate_and_save_prep_pack(
-                    meeting_id=meeting_id,
-                    meeting_analysis=prep_result,
-                    platform=platform
-                )
+                # Create MeetingPrepPack with cleaned data
+                prep_pack_data = {
+                    **cleaned_prep_data,
+                    "tenant_id": tenant_id,
+                    "recurring_meeting_id": recurring_meeting_id,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "updated_at": datetime.now(timezone.utc).isoformat()
+                }
+                
+                prep_pack = MeetingPrepPack(**prep_pack_data)
+                
+                # Save directly using repository
+                meeting_prep_repo = await MeetingPrepRepository.from_default()
+                save_result = await meeting_prep_repo.save_prep_pack(prep_pack, next_meeting)
+
+                # Update next meeting status to scheduled
+                await self._update_meeting_status(next_meeting, platform, 'scheduled')
+                
+                prep_pack = {
+                    "save_result": save_result,
+                    "prep_pack": prep_pack.model_dump()
+                }
             elif not recurring_meeting_id:
                 logger.info("Skipping meeting preparation - no recurring_meeting_id provided")
             
