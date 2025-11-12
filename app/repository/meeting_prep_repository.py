@@ -82,9 +82,10 @@ class MeetingPrepRepository(BaseRepository):
         }
 
         logger.info(
-            "[MeetingPrepRepository] Upserting prep pack for tenant=%s recurring_meeting=%s",
+            "[MeetingPrepRepository] Upserting prep pack for tenant=%s recurring_meeting=%s meeting_id=%s",
             prep_pack.tenant_id,
             prep_pack.recurring_meeting_id,
+            meeting_id,
         )
 
         result = await collection.update_one(key, {"$set": doc}, upsert=True)

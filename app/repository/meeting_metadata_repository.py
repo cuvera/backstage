@@ -110,6 +110,8 @@ class MeetingMetadataRepository(BaseRepository):
                 logger.warning("Meeting not found: meeting_id=%s, platform=%s", meeting_id, platform)
                 return None
             
+            print(doc)
+
             # Convert to standardized format
             if platform == "google":
                 metadata = google_meeting_to_metadata(doc)
@@ -226,11 +228,15 @@ class MeetingMetadataRepository(BaseRepository):
         try:
             query = {
                 "recurringEventId": recurring_meeting_id,
-                "status": "scheduled",
+                # "status": "scheduled",
                 "start": {"$gte": current_end_time},
                 "eventId": {"$ne": current_meeting_metadata.get("id")}
             }
             
+
+            print("Next meeting query: ", query)
+
+
             # Get immediate next meeting
             cursor = collection.find(query, {"eventId": 1}).sort("start", 1).limit(1)
             docs = await cursor.to_list(length=1)
