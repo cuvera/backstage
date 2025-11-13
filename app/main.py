@@ -24,7 +24,6 @@ from app.core.openai_client import llm_client, httpx_client
 consumer_manager = RabbitMQConsumerManager()
 scheduler: AsyncIOScheduler | None = None
 
-
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     setup_logging()
@@ -121,12 +120,19 @@ async def root():
     # }
 
     payload = {
-        "_id": "690ddf0412abd9e67f3d0f8a",
+        "_id": "691300ec64082d8a17bf85bb",
         "tenantId": "689ddc0411e4209395942bee",
         "platform": "google",
         "bucket": "cuverademo",
-        "fileUrl": "689ddc0411e4209395942bee/google/2v8piks0c5s2m80o2pjnubhq9k/Cuvera Bot-2025-11-07T12:03:16.016Z.wav"
+        "fileUrl": "689ddc0411e4209395942bee/google/3leetlec1vouor0iis1h7j0ig1/Cuvera Bot-2025-11-11T09:36:47.739Z.wav"
     }
+    # payload = {
+    #     "_id": "691347f002dabd405f1fbc1d",
+    #     "tenantId": "689ddc0411e4209395942bee",
+    #     "platform": "google",
+    #     "bucket": "cuverademo",
+    #     "fileUrl": "689ddc0411e4209395942bee/google/7uf3qub9n3kllnl2jqvq2u99e3_20251111T142900Z/Cuvera Bot-2025-11-11T14:30:28.488Z.wav"
+    # }
 
     payload_dict = json.loads(json.dumps(payload))
 
