@@ -30,6 +30,8 @@ from app.repository import MeetingMetadataRepository
 from app.repository.meeting_prep_repository import MeetingPrepRepository
 from app.schemas.meeting_analysis import MeetingPrepPack
 from app.utils.s3_client import download_s3_file
+from app.core.openai_client import llm_client
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -82,11 +84,7 @@ class GeminiService:
     """Service for interacting with Gemini 2.5 Flash via OpenAI compatible API."""
     
     def __init__(self):
-        self.client = OpenAI(
-            api_key=os.getenv("GEMINI_API_KEY"),
-            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
-            timeout=1200.0  # 20 minutes timeout
-        )
+        self.client = llm_client
         self.model = "gemini-2.5-flash"
     
     def _get_unified_prompt(self) -> str:
@@ -210,7 +208,7 @@ Rules: Synthesize from `meeting_info` and **≥1 prior meeting** if available (c
             context_message = "\n".join(context_parts)
             
             # Make API call to Gemini
-            response = self.client.chat.completions.create(
+            response = await self.client.chat.completions.parse(
                 model=self.model,
                 messages=[
                     {
@@ -367,13 +365,13 @@ class MeetingAnalysisOrchestrator:
             if not payload:
                 raise MeetingAnalysisOrchestratorError("No payload found in event_data")
             
-            logger.info(f"Processing meeting: {payload.get('summary', 'Unknown')}")
+            logger.info(f"Processing meeting: {payload}")
             
             # Extract meeting details from payload
             meeting_id = str(payload.get('_id'))
             tenant_id = payload.get('tenantId')
             platform = payload.get('platform')
-            bucket = payload.get('bucket', 'recordings')
+            bucket = payload.get('bucket', settings.MEETING_BUCKET_NAME)
             recurring_meeting_id = payload.get('recurring_meeting_id')
             
             if not all([meeting_id, tenant_id]):
@@ -412,6 +410,7 @@ class MeetingAnalysisOrchestrator:
             }
 
             next_meeting = None
+            speaker_timeframes = []
             
             # Get speaker timeframes for Google meetings
             if platform == "google":
@@ -436,7 +435,7 @@ class MeetingAnalysisOrchestrator:
                         next_meeting = await self.meeting_metadata_repo.find_immediate_next_meeting(
                             current_meeting_metadata=meeting_metadata,
                             recurring_meeting_id=recurring_meeting_id,
-                            platform="google"
+                            platform=platform
                         )
 
                         if next_meeting:

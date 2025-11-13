@@ -109,8 +109,6 @@ class MeetingMetadataRepository(BaseRepository):
             if not doc:
                 logger.warning("Meeting not found: meeting_id=%s, platform=%s", meeting_id, platform)
                 return None
-            
-            print(doc)
 
             # Convert to standardized format
             if platform == "google":
