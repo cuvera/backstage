@@ -67,9 +67,11 @@ class Settings(BaseSettings):
 
     RABBITMQ_PAINPOINT_CAPTURED_QUEUE: str = Field(env="painpoint.captured.q",)
     RABBITMQ_MEETING_PROCESSING_QUEUE: str = Field(default="dev.meetings.completed.v1", env="RABBITMQ_MEETING_PROCESSING_QUEUE")
+    RABBITMQ_BACKSTAGE_RETRY_QUEUE: str = Field(default="meetings.analysis.retry", env="RABBITMQ_BACKSTAGE_RETRY_QUEUE")
+    MEETING_BUCKET_NAME: str = Field(default="recordings", env="MEETING_BUCKET_NAME")
 
     # Scheduler configuration
-    PAINPOINT_CRON_EXPRESSION: str = Field(default="0 * * * *", env="PAINPOINT_CRON_EXPRESSION")
+    PAINPOINT_CRON_EXPRESSION: str = Field(default="* * * * *", env="PAINPOINT_CRON_EXPRESSION")
 
     class Config:
         env_file = ".env"
