@@ -85,7 +85,7 @@ class GeminiService:
     
     def __init__(self):
         self.client = llm_client
-        self.model = "gemini-2.5-flash"
+        self.model =  "gemini-2.5-pro"
     
     def _get_unified_prompt(self) -> str:
         return """You are an intelligent meeting analyzer. Using the inputs, you must:
@@ -210,6 +210,7 @@ Rules: Synthesize from `meeting_info` and **≥1 prior meeting** if available (c
             # Make API call to Gemini
             response = await self.client.chat.completions.parse(
                 model=self.model,
+                reasoning_effort="low",
                 messages=[
                     {
                         "role": "system",
@@ -378,7 +379,8 @@ class MeetingAnalysisOrchestrator:
                 raise MeetingAnalysisOrchestratorError("Missing required fields in payload: _id, tenantId")
             
             # Update meeting status to analyzing at start of processing
-            await self._update_meeting_status(meeting_id, platform, 'analysing')
+            if platform == "google":
+                await self._update_meeting_status(meeting_id, platform, 'analysing')
             
             # Step 1: Prepare audio file
             logger.info("Step 1: Preparing audio file")
@@ -507,7 +509,8 @@ class MeetingAnalysisOrchestrator:
                 save_result = await meeting_prep_repo.save_prep_pack(prep_pack, next_meeting)
 
                 # Update next meeting status to scheduled
-                await self._update_meeting_status(next_meeting, platform, 'scheduled')
+                if platform == "google":
+                    await self._update_meeting_status(next_meeting, platform, 'scheduled')
                 
                 prep_pack = {
                     "save_result": save_result,
@@ -524,7 +527,8 @@ class MeetingAnalysisOrchestrator:
             merge_result["meeting_id"] = meeting_id
             
             # Update meeting status to completed on success
-            await self._update_meeting_status(meeting_id, platform, 'completed')
+            if platform == "google":
+                await self._update_meeting_status(meeting_id, platform, 'completed')
             
             return merge_result
 
