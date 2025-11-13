@@ -78,7 +78,7 @@ class TranscriptionRepository(BaseRepository):
                 transcription_entries.append(TranscriptionEntry(
                     start_time=entry.get("start_time", 0.0),
                     end_time=entry.get("end_time", 0.0),
-                    speaker=entry.get("speaker", "Unknown"),
+                    speaker=entry.get("speaker") or entry.get("speakerName", "") or "Unknown",
                     text=entry.get("text", ""),
                     identification_score=entry.get("identification_score", 0.0)
                 ))
