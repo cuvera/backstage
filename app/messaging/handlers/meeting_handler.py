@@ -90,6 +90,7 @@ async def meeting_handler(message: AbstractIncomingMessage) -> None:
     This handler validates and acknowledges messages quickly, then processes them
     asynchronously to prevent timeout issues.
     """
+    processing_service = None
     try:
         logger.info("Received meeting processing message")
         
