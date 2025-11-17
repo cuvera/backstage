@@ -2,6 +2,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from app.repository import TranscriptionRepository
+from app.services.agents import TranscriptionAgent
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +22,7 @@ class TranscriptionService:
         repository = await TranscriptionRepository.from_default()
         return cls(repository=repository)
 
-    async def save_transcription(
+    async def _save_transcription(
         self, 
         meeting_id: str,
         tenant_id: str,
@@ -42,6 +43,62 @@ class TranscriptionService:
         except Exception as exc:
             logger.exception("Failed to save transcription for meeting=%s: %s", meeting_id, exc)
             raise TranscriptionServiceError(f"Failed to save transcription: {exc}") from exc
+
+    async def save_transcription(
+        self, 
+        audio_file_path: str,
+        meeting_id: str,
+        tenant_id: str,
+        meeting_metadata: Dict[str, Any],
+        processing_metadata: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Transcribe audio file and save transcription to database.
+        
+        Args:
+            audio_file_path: Path to audio file to transcribe
+            meeting_id: Meeting identifier
+            tenant_id: Tenant identifier  
+            meeting_metadata: Meeting metadata including speaker timeframes
+            processing_metadata: Optional processing metadata
+            
+        Returns:
+            Saved transcription document
+            
+        Raises:
+            TranscriptionServiceError: If transcription or saving fails
+        """
+        try:
+            logger.info(f"Starting transcription service for meeting={meeting_id}")
+            
+            # Use TranscriptionAgent to transcribe audio
+            agent = TranscriptionAgent()
+            transcription_result = await agent.transcribe(audio_file_path, meeting_metadata)
+            
+            # Extract conversation from transcription result
+            conversation = transcription_result["conversation"]
+            
+            # Add transcription metadata to processing metadata
+            enriched_metadata = processing_metadata or {}
+            enriched_metadata.update({
+                "total_speakers": transcription_result.get("total_speakers", 0),
+                "sentiments": transcription_result.get("sentiments", {}),
+                "transcription_agent_version": "1.0"
+            })
+            
+            # Save to database using private method
+            result = await self._save_transcription(
+                meeting_id=meeting_id,
+                tenant_id=tenant_id,
+                conversation=conversation,
+                processing_metadata=enriched_metadata
+            )
+            
+            logger.info(f"Transcription completed and saved for meeting={meeting_id}")
+            return result
+            
+        except Exception as exc:
+            logger.exception(f"Failed to transcribe and save for meeting={meeting_id}: {exc}")
+            raise TranscriptionServiceError(f"Failed to transcribe and save: {exc}") from exc
 
     async def get_transcription(self, meeting_id: str, tenant_id: str) -> Optional[Dict[str, Any]]:
         """Get transcription using repository."""
