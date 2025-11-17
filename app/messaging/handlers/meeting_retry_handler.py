@@ -79,7 +79,7 @@ async def _fetch_and_validate_meeting(meeting_id: str, tenant_id: str) -> Dict[s
         meeting_data["fileUrl"] = file_url
         return meeting_data
     else:
-        meeting_data["_id"] = meeting_id
+        meeting_data["_id"] = id
         meeting_data["tenantId"] = tenant_id
         meeting_data["platform"] = "offline"
         return meeting_data
