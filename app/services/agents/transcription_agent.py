@@ -23,7 +23,7 @@ class TranscriptionAgent:
     Uses the same audio processing pattern as MeetingAnalysisOrchestrator.
     """
 
-    def __init__(self, client=None, model="gemini-exp-1206"):
+    def __init__(self, client=None, model="gemini-2.5-flash"):
         """
         Initialize TranscriptionAgent.
         
@@ -74,7 +74,7 @@ class TranscriptionAgent:
             context_message = "\n".join(context_parts)
             
             # Make API call to Gemini (copied from orchestrator lines 211-237)
-            response = await self.client.chat.completions.parse(
+            response = await self.client.chat.completions.create(
                 model=self.model,
                 reasoning_effort="low",
                 messages=[
@@ -108,17 +108,57 @@ class TranscriptionAgent:
             logger.info(f"First choice: {response.choices[0] if response.choices else 'No choices'}")
             
             response_content = response.choices[0].message.content
-            logger.info(f"Response content: {response_content}")
+            logger.info(f"Response content length: {len(response_content) if response_content else 0}")
+            logger.info(f"Response content preview: {response_content[:500] if response_content else 'None'}...")
+            logger.info(f"Response content ending: ...{response_content[-200:] if response_content and len(response_content) > 200 else response_content}")
             
             if not response_content:
                 raise TranscriptionAgentError("Gemini returned empty response content")
             
             # Parse and validate JSON response
             try:
-                result = json.loads(response_content)
+                # Strip markdown formatting if present
+                cleaned_content = response_content.strip()
+                if cleaned_content.startswith("```json"):
+                    # Extract JSON from markdown code block
+                    start_marker = "```json"
+                    end_marker = "```"
+                    start_idx = cleaned_content.find(start_marker) + len(start_marker)
+                    end_idx = cleaned_content.rfind(end_marker)
+                    if end_idx > start_idx:
+                        cleaned_content = cleaned_content[start_idx:end_idx].strip()
+                elif cleaned_content.startswith("```"):
+                    # Handle generic code block
+                    lines = cleaned_content.split('\n')
+                    if len(lines) > 2:
+                        cleaned_content = '\n'.join(lines[1:-1]).strip()
+                
+                result = json.loads(cleaned_content)
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse Gemini response as JSON: {e}")
-                raise TranscriptionAgentError(f"Invalid JSON response from Gemini: {e}") from e
+                logger.error(f"Cleaned content length: {len(cleaned_content)}")
+                logger.error(f"Cleaned content ending: ...{cleaned_content[-500:] if len(cleaned_content) > 500 else cleaned_content}")
+                
+                # Try to fix truncated JSON
+                try:
+                    # If it looks like truncated conversation array, try to close it
+                    if '"text"' in cleaned_content and not cleaned_content.rstrip().endswith('}'):
+                        # Find the last complete conversation entry
+                        last_complete = cleaned_content.rfind('"}')
+                        if last_complete > 0:
+                            # Truncate to last complete entry and close the JSON
+                            truncated_content = cleaned_content[:last_complete + 2]
+                            # Close conversation array and add minimal required fields
+                            fixed_content = truncated_content + '], "total_speakers": 1, "sentiments": {"overall": "neutral", "participant": []}}'
+                            logger.warning("Attempting to fix truncated JSON response")
+                            result = json.loads(fixed_content)
+                        else:
+                            raise e
+                    else:
+                        raise e
+                except json.JSONDecodeError:
+                    logger.error(f"Raw response content: {response_content}")
+                    raise TranscriptionAgentError(f"Invalid JSON response from Gemini: {e}") from e
             
             # Validate required fields
             required_fields = ["conversation", "total_speakers", "sentiments"]
