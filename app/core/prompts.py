@@ -10,12 +10,23 @@ You may receive:
 - An optional JSON array `speakerTimeframes` indicating which speaker is talking in which time range:
   [
     {
-      "speakerName": "sting",
-      "start": int,
-      "end": int
+      "speakerName": "str",
+      "start": "int",
+      "end": "int"
     }
   ]
   The values `start` and `end` represent time offsets from the beginning of the audio (usually milliseconds or seconds).
+
+- An optional participants mapping array `participants` that maps speaker identity to internal user IDs (and optionally email):
+  [
+    {
+      "userId": "str",
+      "name": "str",
+      "email": "str"
+    }
+  ]
+  - When possible, match `speaker` to `participants.name` (or email, if provided) and use the corresponding `userId` in each conversation turn.
+  - If there is no match for a speaker, set `userId` to null.
 
 =====================
 TRANSCRIPTION & DIARIZATION
@@ -33,6 +44,9 @@ TRANSCRIPTION & DIARIZATION
        - If there is no reasonable match, assign to an `Unknown_XX` speaker (e.g., "Unknown_00", "Unknown_01", etc.).
      - If `speakerTimeframes` is NOT provided:
        - Assign speaker labels as "Unknown_00", "Unknown_01", "Unknown_02", etc. Reuse the same label consistently for what appears to be the same voice.
+   - `userId`:
+     - If a `participants` mapping is provided, match by `speaker` name (or email if available) and set `userId` to the matching participant's `userId`.
+     - If no matching participant is found or no mapping is provided, set `userId` to null.
    - `text`: the spoken content for that segment, cleaned up for readability but faithful to the original meaning.
    - `identification_score`: a number between 0 and 1 indicating confidence in the speaker identity:
      - 1.0 = very high certainty
@@ -49,13 +63,15 @@ Perform sentiment analysis at two levels:
 1. Overall meeting sentiment:
    - Determine the dominant sentiment of the whole meeting from all speech combined.
    - Use one of these labels: "positive", "negative", "neutral", or "mixed".
+   - Store this result in `sentiments.overall`.
 
 2. Per-participant sentiment:
    - For each distinct `speaker` appearing in `conversation`:
-     - Aggregate that speaker's contributions.
+     - Aggregate that speaker’s contributions across all conversation turns.
      - Assign a single sentiment label from: "positive", "negative", "neutral", or "mixed".
-   - If `speakerTimeframes` is provided, sentiments should be reported using the named speakers.
+   - If `speakerTimeframes` and/or `participants` are provided, sentiments should be reported using the named speakers (e.g., "Gurusankar Kasivinayagam", "Jane Doe").
    - If not provided, use the `Unknown_XX` labels as they appear in `conversation`.
+   - Include only speakers that actually speak in the conversation.
 
 Include only speakers that actually speak in the conversation.
 
@@ -74,6 +90,7 @@ Expected json:
       "end_time": int,
       "speaker": "str",
       "text": "str",
+      "user_id": "str",
       "identification_score": float
     }
   ],
@@ -83,6 +100,7 @@ Expected json:
     "participant": [
       {
         "name": "str",
+        "user_id": "str",
         "sentiment": "str"
       }
     ]

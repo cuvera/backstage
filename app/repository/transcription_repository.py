@@ -6,7 +6,14 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo import ASCENDING
 from bson.objectid import ObjectId
 
-from app.schemas.transcription import TranscriptionDocument, TranscriptionEntry, ProcessingMetadata
+from app.schemas.transcription import (
+    TranscriptionDocument, 
+    TranscriptionEntry, 
+    ProcessingMetadata,
+    SentimentOverview,
+    ParticipantSentiment,
+    SentimentLabel
+)
 from .base_repository import BaseRepository
 
 logger = logging.getLogger(__name__)
@@ -55,7 +62,8 @@ class TranscriptionRepository(BaseRepository):
         meeting_id: str,
         tenant_id: str,
         conversation: List[Dict[str, Any]],
-        processing_metadata: Optional[Dict[str, Any]] = None
+        sentiments: Optional[Dict[str, Any]] = None,
+        processing_metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Save transcription data to MongoDB.
@@ -64,6 +72,7 @@ class TranscriptionRepository(BaseRepository):
             meeting_id: Meeting identifier
             tenant_id: Tenant identifier
             conversation: List of transcription entries from vox_scribe
+            sentiments: Sentiment analysis data
             processing_metadata: Optional processing metadata
             
         Returns:
@@ -75,17 +84,36 @@ class TranscriptionRepository(BaseRepository):
             # Convert conversation entries to proper format
             transcription_entries = []
             for entry in conversation:
+                user_id = None
+                if entry.get("user_id"):
+                    user_id = entry.get("user_id")
+                
                 transcription_entries.append(TranscriptionEntry(
                     start_time=entry.get("start_time", 0.0),
                     end_time=entry.get("end_time", 0.0),
                     speaker=entry.get("speaker") or entry.get("speakerName", "") or "Unknown",
                     text=entry.get("text", ""),
-                    identification_score=entry.get("identification_score", 0.0)
+                    identification_score=entry.get("identification_score", 0.0),
+                    user_id=user_id
                 ))
             
             # Calculate total speakers
             unique_speakers = set(entry.speaker for entry in transcription_entries)
             total_speakers = len(unique_speakers)
+            
+            # Build sentiment overview
+            participant_sentiments = []
+            for participant in sentiments.get("participant", []):
+                participant_sentiments.append(ParticipantSentiment(
+                    name=participant.get("name", "Unknown"),
+                    user_id=participant.get("userId"),
+                    sentiment=SentimentLabel(participant.get("sentiment", "neutral"))
+                ))
+            
+            sentiment_overview = SentimentOverview(
+                overall=SentimentLabel(sentiments.get("overall", "neutral")),
+                participant=participant_sentiments
+            )
             
             # Build processing metadata
             proc_metadata = ProcessingMetadata(
@@ -100,6 +128,7 @@ class TranscriptionRepository(BaseRepository):
                 tenant_id=tenant_id,
                 conversation=transcription_entries,
                 total_speakers=total_speakers,
+                sentiments=sentiment_overview,
                 processing_metadata=proc_metadata,
                 created_at=datetime.utcnow(),
                 updated_at=datetime.utcnow()

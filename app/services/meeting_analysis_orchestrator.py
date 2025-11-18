@@ -90,15 +90,14 @@ class MeetingAnalysisOrchestrator:
                 
                 meeting_metadata = await self.meeting_metadata_repo.get_meeting_metadata(meeting_id)
                 # print the data from meeting_metadata
-                print(meeting_metadata.get("speaker_timeframes", []))
-                print(meeting_metadata.get("recurring_meeting_id", None))
-                print(meeting_metadata.get("start_time", None))
 
                 if meeting_metadata:
                     speaker_timeframes = meeting_metadata.get("speaker_timeframes", [])
                     meeting_info["speakerTimeframes"] = speaker_timeframes
                     recurring_meeting_id = meeting_metadata.get('recurring_meeting_id', None)
                     meeting_info['recurring_meeting_id'] = recurring_meeting_id
+                    logger.info(f"Found {len(speaker_timeframes)} speaker timeframes for Google meeting")
+                    meeting_info['attendees'] = meeting_metadata.get('attendees', [])
                     logger.info(f"Found {len(speaker_timeframes)} speaker timeframes for Google meeting")
 
                     if recurring_meeting_id:
@@ -116,11 +115,28 @@ class MeetingAnalysisOrchestrator:
             
             # Step 3: Transcription with TranscriptionAgent
             logger.info("Step 3: Transcribing audio with TranscriptionAgent")
-            transcription_agent = TranscriptionAgent()
-            transcription_result = await transcription_agent.transcribe(
+            # transcription_agent = TranscriptionAgent()
+            transcription_service = TranscriptionService()
+            transcription_result = await transcription_service.save_transcription(
                 audio_file_path=file_url,
+                meeting_id=meeting_id,
+                tenant_id=tenant_id,
                 meeting_metadata=meeting_info
             )
+
+            #             # Step 6: Save transcription to database
+            # logger.info("Step 6: Saving transcription to database")
+            # transcription_service = await TranscriptionService.from_default()
+            # await transcription_service._save_transcription(
+            #     meeting_id=meeting_id,
+            #     tenant_id=tenant_id,
+            #     conversation=transcription_result["conversation"],
+            #     processing_metadata={
+            #         "total_speakers": transcription_result.get("total_speakers", 0),
+            #         "sentiments": transcription_result.get("sentiments", {}),
+            #         "transcription_agent_version": "1.0"
+            #     }
+            # )
             
             # Step 4: Meeting Analysis with CallAnalysisAgent  
             logger.info("Step 4: Analyzing meeting with CallAnalysisAgent")
@@ -148,21 +164,7 @@ class MeetingAnalysisOrchestrator:
             # Step 5: Save Meeting Analysis
             logger.info("Step 5: Saving meeting analysis")
             analysis_service = await MeetingAnalysisService.from_default()
-            analysis_save_result = await analysis_service.save_analysis(meeting_analysis)
-            
-            # Step 6: Save transcription to database
-            logger.info("Step 6: Saving transcription to database")
-            transcription_service = await TranscriptionService.from_default()
-            await transcription_service._save_transcription(
-                meeting_id=meeting_id,
-                tenant_id=tenant_id,
-                conversation=transcription_result["conversation"],
-                processing_metadata={
-                    "total_speakers": transcription_result.get("total_speakers", 0),
-                    "sentiments": transcription_result.get("sentiments", {}),
-                    "transcription_agent_version": "1.0"
-                }
-            )
+            analysis_save_result = await analysis_service.save_analysis(meeting_analysis)            
 
             # Step 7: Meeting Preparation with MeetingPrepCuratorService
             logger.info("Step 7: Processing meeting preparation")

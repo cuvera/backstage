@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from app.core.openai_client import llm_client
 from app.core.prompts import TRANSCRIPTION_AND_SENTIMENT_ANALYSIS_PROMPT
@@ -23,7 +23,7 @@ class TranscriptionAgent:
     Uses the same audio processing pattern as MeetingAnalysisOrchestrator.
     """
 
-    def __init__(self, client=None, model="gemini-2.5-flash"):
+    def __init__(self, client=None, model="gemini-2.5-pro"):
         """
         Initialize TranscriptionAgent.
         
@@ -37,7 +37,8 @@ class TranscriptionAgent:
     async def transcribe(
         self, 
         audio_file_path: str, 
-        meeting_metadata: Dict[str, Any]
+        meeting_metadata: Dict[str, Any],
+        participants: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """
         Transcribe audio file and perform sentiment analysis.
@@ -71,6 +72,10 @@ class TranscriptionAgent:
             if meeting_metadata.get('speakerTimeframes'):
                 context_parts.append(f"speakerTimeframes: {json.dumps(meeting_metadata['speakerTimeframes'])}")
             
+            # Include participant information if available
+            if participants:
+                context_parts.append(f"participants: {json.dumps(participants)}")
+
             context_message = "\n".join(context_parts)
             
             # Make API call to Gemini (copied from orchestrator lines 211-237)
