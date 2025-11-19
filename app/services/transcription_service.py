@@ -56,7 +56,11 @@ class TranscriptionService:
             print(attendees_email)
 
             authClient = AuthServiceClient()
-            participants = await authClient.fetch_users_by_emails(attendees_email)
+            try:
+                participants = await authClient.fetch_users_by_emails(attendees_email)
+            except Exception as e:
+                logger.warning(f"Failed to fetch user details from auth service: {e}, proceeding without participant data")
+                participants = []
 
             # Use TranscriptionAgent to transcribe audio
             agent = TranscriptionAgent()

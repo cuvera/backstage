@@ -104,6 +104,7 @@ class TranscriptionAgent:
                         ]
                     }
                 ],
+                response_format={"type": "json_object"},
                 temperature=0.1
             )
             
@@ -123,47 +124,10 @@ class TranscriptionAgent:
             # Parse and validate JSON response
             try:
                 # Strip markdown formatting if present
-                cleaned_content = response_content.strip()
-                if cleaned_content.startswith("```json"):
-                    # Extract JSON from markdown code block
-                    start_marker = "```json"
-                    end_marker = "```"
-                    start_idx = cleaned_content.find(start_marker) + len(start_marker)
-                    end_idx = cleaned_content.rfind(end_marker)
-                    if end_idx > start_idx:
-                        cleaned_content = cleaned_content[start_idx:end_idx].strip()
-                elif cleaned_content.startswith("```"):
-                    # Handle generic code block
-                    lines = cleaned_content.split('\n')
-                    if len(lines) > 2:
-                        cleaned_content = '\n'.join(lines[1:-1]).strip()
-                
+                cleaned_content = response_content.strip()                
                 result = json.loads(cleaned_content)
             except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse Gemini response as JSON: {e}")
-                logger.error(f"Cleaned content length: {len(cleaned_content)}")
-                logger.error(f"Cleaned content ending: ...{cleaned_content[-500:] if len(cleaned_content) > 500 else cleaned_content}")
-                
-                # Try to fix truncated JSON
-                try:
-                    # If it looks like truncated conversation array, try to close it
-                    if '"text"' in cleaned_content and not cleaned_content.rstrip().endswith('}'):
-                        # Find the last complete conversation entry
-                        last_complete = cleaned_content.rfind('"}')
-                        if last_complete > 0:
-                            # Truncate to last complete entry and close the JSON
-                            truncated_content = cleaned_content[:last_complete + 2]
-                            # Close conversation array and add minimal required fields
-                            fixed_content = truncated_content + '], "total_speakers": 1, "sentiments": {"overall": "neutral", "participant": []}}'
-                            logger.warning("Attempting to fix truncated JSON response")
-                            result = json.loads(fixed_content)
-                        else:
-                            raise e
-                    else:
-                        raise e
-                except json.JSONDecodeError:
-                    logger.error(f"Raw response content: {response_content}")
-                    raise TranscriptionAgentError(f"Invalid JSON response from Gemini: {e}") from e
+                logger.error(f"Malformed JSON strcuture, Failed to parse Gemini response as JSON: {e}")
             
             # Validate required fields
             required_fields = ["conversation", "total_speakers", "sentiments"]
