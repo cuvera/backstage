@@ -137,7 +137,6 @@ class CallAnalysisAgent:
         # 2. Get per-speaker sentiment from the 'participant' list
         per_speaker: Dict[str, SentimentLabel] = {}
         participants = sentiments.get("participant", [])
-        
         for p in participants:
             name = (p.get("name") or "").strip()
             sentiment_str = (p.get("sentiment") or "neutral").strip()
@@ -178,10 +177,8 @@ class CallAnalysisAgent:
             "}\n\n"
             "QUALITY RULES AND FIELD DEFINITIONS:\n"
             "1. **MUTUALLY EXCLUSIVE:** An item CANNOT be both a Decision and an Action Item. You must choose the single best category.\n"
-            "2. **DECISION vs ACTION ITEM:**\n"
-            "   - **DECISION:** A final **outcome**, **approval**, **agreement**, or **policy change** made during the meeting. It is a STATE CHANGE. (e.g., 'Budget Approved', 'Hiring Freeze Lifted', 'Vendor X Selected').\n"
-            "     * **NEGATIVE CONSTRAINT:** Do NOT list 'We agreed to do [Task]' as a decision. That is just an Action Item.\n"
-            "   - **ACTION ITEM:** A specific **task**, **to-do**, or **deliverable** assigned for FUTURE execution. It is WORK to be done. (e.g., 'John to email the report', 'Schedule follow-up meeting', 'Fix bug #123').\n"
+            "2. **DECISION:** A final **outcome**, **approval**, **agreement**, or **policy change** made during the meeting. It is a STATE CHANGE. (e.g., 'Budget Approved', 'Hiring Freeze Lifted', 'Vendor X Selected').\n"
+            "2. **ACTION ITEM:** A specific **task**, **to-do**, or **deliverable** assigned for FUTURE execution. Any task or actionable follow-up that mentions an owner name or a time/due-date must be captured as an action item.\n"
             "3. **Summary:** A comprehensive, high-level overview (5-8 crisp sentences) covering the main **purpose/goals**, the final **outcomes**, and any major **follow-up** steps.\n"
             "4. **Key Points:** Specific, factual, bullet-style highlights (strings) of significant **progress**, **blockers**, **metrics**, or **updates** discussed.\n"
             "5. Decisions/action_items must include references (0-based turn indices); otherwise use an empty list. All references must be integers.\n"
