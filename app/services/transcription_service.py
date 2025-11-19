@@ -145,8 +145,7 @@ class TranscriptionService:
 
     async def get_transcription(self, meeting_id: str, tenant_id: str) -> Optional[Dict[str, Any]]:
         """Get transcription using repository."""
-        if not self._repository:
-            raise RuntimeError("Repository not initialized")
+        self._repository = await TranscriptionRepository.from_default()        
         
         try:
             return await self._repository.get_transcription(meeting_id, tenant_id)

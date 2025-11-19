@@ -65,12 +65,12 @@ class TranscriptionAgent:
             
             # Prepare context message (similar to orchestrator lines 198-208)
             context_parts = [
-                f"meeting_metadata: {json.dumps(meeting_metadata)}"
+                f"meeting_metadata: {json.dumps(meeting_metadata, default=str)}"
             ]
             
             # Include speaker timeframes if available
-            if meeting_metadata.get('speakerTimeframes'):
-                context_parts.append(f"speakerTimeframes: {json.dumps(meeting_metadata['speakerTimeframes'])}")
+            if meeting_metadata.get('speaker_timeframes'):
+                context_parts.append(f"speaker_timeframes: {json.dumps(meeting_metadata['speaker_timeframes'], default=str)}")
             
             # Include participant information if available
             if participants:
