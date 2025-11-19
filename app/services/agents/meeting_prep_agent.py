@@ -10,8 +10,6 @@ from pydantic import ValidationError
 from app.schemas.meeting_analysis import (
     BlockingItem,
     BlockingItemStatus,
-    ConfidenceLevel,
-    DecisionQueueItem,
     ExpectedOutcome,
     MeetingAnalysis,
     MeetingPrepPack,
@@ -109,9 +107,8 @@ class MeetingPrepAgent:
                 previous_meetings_context += f"Summary: {analysis.summary}\n"
                 previous_meetings_context += f"Key Points: {', '.join(analysis.key_points)}\n"
                 previous_meetings_context += f"Action Items: {', '.join([item.task for item in analysis.action_items])}\n"
-                previous_meetings_context += f"Open Questions: {', '.join(analysis.open_questions)}\n"
-                previous_meetings_context += f"Topics: {', '.join(analysis.topics)}\n"
-                previous_meetings_context += f"Confidence: {analysis.confidence}\n"
+                # previous_meetings_context += f"Open Questions: {', '.join(analysis.open_questions)}\n" # Removed as per request to simplify
+                # previous_meetings_context += f"Topics: {', '.join(analysis.topics)}\n" # Removed as per request to simplify
         else:
             previous_meetings_context = "No previous meeting data available.\n"
 
@@ -121,20 +118,19 @@ class MeetingPrepAgent:
         You will receive a JSON object with:
             - meeting: upcoming meeting metadata.
             - attendees: tentative
-            - signals: machine-extracted summaries from ≥3 prior meetings (per-meeting summaries, topics, decisions, action items, open questions, sentiment, talk-time, transcript links).
+            - signals: machine-extracted summaries from ≥3 prior meetings (per-meeting summaries, topics, decisions, action items).
+
+        STYLE GUIDE (CRITICAL)
+        - **Tone:** Executive, concise, action-oriented. No corporate fluff.
+        - **Format:** Use "Status: Context" for bullets (e.g., "Frontend: 50% Complete (On Track)").
+        - **Quantify:** Use numbers, dates, and percentages where possible.
+        - **Voice:** Active voice. "Bob to fix bug" instead of "Bug should be fixed by Bob".
 
         WHAT TO DO
         - Synthesize purpose and today_outcomes (decision/approval/alignment) from inputs and last 1 or more meetings.
-        - Produce top_deltas (2–4 bullets) citing which previous meeting(s) they compare against.
         - Identify blocking_items (owner, ETA, impact) that must be cleared to decide today.
-        - List leadership_asks (what executives must approve/decide today).
-        - Create decision_queue with readiness scores (0–100) and explicit needs.
-        - Build risk_radar (delivery, budget, people, compliance) with notes grounded in the last 1 or more meetings.
-        - Populate confidence_bar (transcript confidence).
-        - Critically add pre_meeting_questions:
-            - Derive from unresolved open questions, overdue actions, blockers, or data gaps across the last1 or more meetings.
-            - Each question must have: clear wording, ask_to (specific person(s) by email/role), priority (P0/P1/P2), due_by (IST), a short why (decision/blocker it unblocks), related_items (decision IDs, action IDs, agenda IDs), and source_meetings (IDs of prior meetings where the gap originated).
-            - Keep questions actionable and unambiguous.
+        - **Key Points:** Generate 3-5 high-impact bullet points. Focus strictly on **DELTAS** (what changed since last time) and **PROGRESS**.
+        - **Open Questions:** Generate exactly 3 critical strategic questions that need to be answered in this meeting to unblock progress.
 
         IMPORTANT
         - Do not come up with data on your own
@@ -142,40 +138,25 @@ class MeetingPrepAgent:
 
         OUTPUT FORMAT (must be valid JSON; no comments):
         {{
-        "title": "string",
-        "timezone": "string",
-        "locale": "en-US",
-        "purpose":"string",
-        "confidence": "low|medium|high",
+        "title": "string (The exact title of the meeting)",
+        "purpose":"string (A single, punchy sentence stating the STRATEGIC GOAL of this specific session. E.g., 'Unblock Auth Service to maintain Demo Timeline.')",
         "expected_outcomes": [{{
-            "description": "string",
-            "owner": "email",
+            "description": "string (Specific decision, approval, or alignment point required)",
+            "owner": "email (Who is responsible for this outcome)",
             "type": "decision|approval|alignment"
         }}],
         "blocking_items": [
             {{
-            "title": "string",
-            "owner": "email",
-            "eta": "YYYY-MM-DD",
-            "impact": "string",
+            "title": "string (Critical blocker that this meeting must resolve)",
+            "owner": "email (Who owns the blocker)",
+            "eta": "YYYY-MM-DD (Estimated resolution date)",
+            "impact": "string (Business impact: 'Delays Demo', 'Blocks QA', etc.)",
             "severity": "low|medium|high",
             "status": "open|mitigating|cleared"
             }}
         ],
-        "decision_queue": [
-            {{
-            "id": "string",
-            "title": "string",
-            "needs": [
-                "string"
-            ],
-            "owner": "email"
-            }}
-        ],
-        "key_points": ["string"],
-        "open_questions": ["string"],
-        "risks_issues": ["string"],
-        "leadership_asks": ["string"]
+        "key_points": ["string (Format: '**Topic:** Status/Delta'. E.g., '**Frontend:** 50% Complete (On Track)')"],
+        "open_questions": ["string (Strategic question. E.g., 'What is the specific remediation plan for the Auth bug?')"]
         }}
 
         MEETING INFORMATION:
@@ -272,18 +253,12 @@ class MeetingPrepAgent:
         prep_pack_data = {
             "title": parsed_response.get("title", meeting_metadata.get("title", "Meeting Prep Pack")),
             "tenant_id": meeting_metadata.get("tenant_id", ""),
-            "timezone": parsed_response.get("timezone", meeting_metadata.get("timezone", "UTC")),
-            "locale": parsed_response.get("locale", meeting_metadata.get("locale", "en-US")),
             "recurring_meeting_id": recurring_meeting_id,
             "purpose": parsed_response.get("purpose", ""),
-            "confidence": self._safe_confidence(parsed_response.get("confidence")),
             "expected_outcomes": self._build_expected_outcomes(parsed_response.get("expected_outcomes", [])),
             "blocking_items": self._build_blocking_items(parsed_response.get("blocking_items", [])),
-            "decision_queue": self._build_decision_queue(parsed_response.get("decision_queue", [])),
             "key_points": self._ensure_str_list(parsed_response.get("key_points", [])),
             "open_questions": self._ensure_str_list(parsed_response.get("open_questions", [])),
-            "risks_issues": self._ensure_str_list(parsed_response.get("risks_issues", [])),
-            "leadership_asks": self._ensure_str_list(parsed_response.get("leadership_asks", [])),
             "previous_meetings_ref": previous_refs,
             "created_at": now,
             "updated_at": now,
@@ -362,33 +337,6 @@ class MeetingPrepAgent:
         
         return items
 
-    def _build_decision_queue(self, queue_data: List[Dict[str, Any]]) -> List[DecisionQueueItem]:
-        """Build decision queue items from parsed data."""
-        items = []
-        if not isinstance(queue_data, list):
-            return items
-        
-        for item_dict in queue_data:
-            if not isinstance(item_dict, dict):
-                continue
-            
-            item_id = item_dict.get("id", "").strip()
-            title = item_dict.get("title", "").strip()
-            if not item_id or not title:
-                continue
-            
-            needs = self._ensure_str_list(item_dict.get("needs", []))
-            
-            item = DecisionQueueItem(
-                id=item_id,
-                title=title,
-                needs=needs,
-                owner=item_dict.get("owner", "").strip(),
-            )
-            items.append(item)
-        
-        return items
-
     def _ensure_str_list(self, value: Any) -> List[str]:
         """Ensure value is a list of non-empty strings."""
         items = []
@@ -403,15 +351,3 @@ class MeetingPrepAgent:
                     if candidate:
                         items.append(candidate)
         return items
-
-    def _safe_confidence(self, value: Any) -> ConfidenceLevel:
-        """Safely convert value to ConfidenceLevel."""
-        if isinstance(value, ConfidenceLevel):
-            return value
-        if isinstance(value, str):
-            norm = value.strip().lower()
-            try:
-                return ConfidenceLevel(norm)
-            except ValueError:
-                pass
-        return ConfidenceLevel.medium

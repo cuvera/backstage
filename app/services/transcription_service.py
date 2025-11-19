@@ -77,17 +77,6 @@ class TranscriptionService:
                 "transcription_agent_version": "1.0"
             })
             
-            # write to json file
-            import json
-            with open(f"transcription_{meeting_id}.json", "w") as f:
-                json.dump({
-                "meeting_id": meeting_id,
-                "tenant_id": tenant_id,
-                "conversation": conversation,
-                "total_speakers": transcription_result.get("total_speakers", 0),
-                "sentiments": transcription_result.get("sentiments", {})
-                }, f, indent=2)
-            
             # Extract and enhance sentiments with user IDs
             sentiments = transcription_result.get("sentiments", {})
             enhanced_sentiments = self._map_sentiments_to_users(sentiments, participants)

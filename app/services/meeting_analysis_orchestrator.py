@@ -140,8 +140,13 @@ class MeetingAnalysisOrchestrator:
                 "duration_sec": sum((turn.get("end_time", 0) - turn.get("start_time", 0)) for turn in transcription_result["conversation"])
             }
             
+            # Wait for 5 sec
+            import time
+            print("Waiting for 2 seconds before analysis...")
+            time.sleep(2)
+
             call_analysis_agent = CallAnalysisAgent()
-            meeting_analysis = call_analysis_agent.analyze(
+            meeting_analysis = await call_analysis_agent.analyze(
                 transcript_payload=transcript_payload,
                 context={
                     "tenant_id": tenant_id,
@@ -164,6 +169,9 @@ class MeetingAnalysisOrchestrator:
             print("next_meeting: ", next_meeting)
 
             if recurring_meeting_id and next_meeting:
+                print("Waiting for 2 seconds before meeting preparation...")
+                time.sleep(2)
+
                 try:
                     prep_curator_service = await MeetingPrepCuratorService.from_default()
                     prep_result = await prep_curator_service.generate_and_save_prep_pack(
