@@ -13,10 +13,7 @@ class SentimentLabel(str, Enum):
     mixed = "mixed"
 
 
-class ConfidenceLevel(str, Enum):
-    low = "low"
-    medium = "medium"
-    high = "high"
+
 
 
 class OutcomeType(str, Enum):
@@ -52,11 +49,7 @@ class BlockingItem(BaseModel):
     status: BlockingItemStatus = BlockingItemStatus.open
 
 
-class DecisionQueueItem(BaseModel):
-    id: str = Field(..., min_length=1)
-    title: str = Field(..., min_length=1)
-    needs: List[str] = Field(default_factory=list)
-    owner: str = Field(default="")
+
 
 
 class PreviousMeetingReference(BaseModel):
@@ -218,18 +211,12 @@ class MeetingAnalysis(BaseModel):
 class MeetingPrepPack(BaseModel):
     title: str = Field(..., min_length=1)
     tenant_id: str = Field(..., min_length=1)
-    timezone: str = Field(default="")
-    locale: str = Field(default="en-US")
     recurring_meeting_id: str = Field(..., min_length=1)
     purpose: str = Field(default="")
-    confidence: ConfidenceLevel = ConfidenceLevel.medium
     expected_outcomes: List[ExpectedOutcome] = Field(default_factory=list)
     blocking_items: List[BlockingItem] = Field(default_factory=list)
-    decision_queue: List[DecisionQueueItem] = Field(default_factory=list)
     key_points: List[str] = Field(default_factory=list)
     open_questions: List[str] = Field(default_factory=list)
-    risks_issues: List[str] = Field(default_factory=list)
-    leadership_asks: List[str] = Field(default_factory=list)
     previous_meetings_ref: List[PreviousMeetingReference] = Field(default_factory=list)
     created_at: str = Field(..., min_length=1)
     updated_at: str = Field(..., min_length=1)
