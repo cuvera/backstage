@@ -74,7 +74,11 @@ class MeetingAnalysisOrchestrator:
                 await self._update_meeting_status(meeting_id, platform, 'analysing')
                 meeting_metadata = await self.meeting_metadata_repo.get_meeting_metadata(meeting_id)
 
-                if meeting_metadata and recurring_meeting_id:
+                print(f"Meeting metadata: {meeting_metadata}")
+
+                if meeting_metadata and meeting_metadata.get("recurring_meeting_id"):
+                    recurring_meeting_id = meeting_metadata.get("recurring_meeting_id")
+
                     # fetch immediate next meeting from recurring_meeting_id
                     next_meeting = await self.meeting_metadata_repo.find_immediate_next_meeting(
                         current_meeting_metadata=meeting_metadata,
@@ -83,8 +87,9 @@ class MeetingAnalysisOrchestrator:
                     )
 
                     if next_meeting:
-                        logger.info("next meeting found: ", next_meeting)
                         await self._update_meeting_status(next_meeting, platform, 'analysing')
+            else:
+                meeting_metadata = {}
 
             #################################################
             # Step 1: Prepare audio file
@@ -113,8 +118,8 @@ class MeetingAnalysisOrchestrator:
             else:
                 logger.info("Step 1: Transcription exists, Skipping audio file preparation and transcription");
 
-            # logger.info("Waiting for 2 seconds before analysis...")
-            # time.sleep(2)
+            logger.info("Waiting for 2 seconds before analysis...")
+            time.sleep(2)
 
             #################################################
             # Step 2: Meeting Analysis with CallAnalysisAgent
@@ -126,61 +131,56 @@ class MeetingAnalysisOrchestrator:
 
             if not analysis:
                 call_analysis_agent = CallAnalysisAgent()
-                meeting_analysis = await call_analysis_agent.analyze(
+
+                # duration in seconds, last turn end time - first turn start time
+                if transcription["conversation"] and len(transcription["conversation"]) > 0:
+                    duration = transcription["conversation"][-1]["end_time"] - transcription["conversation"][0]["start_time"]
+                else:
+                    duration = 0
+
+                analysis = await call_analysis_agent.analyze(
                         transcript_payload={
-                        "tenant_id": tenant_id,
-                        "session_id": meeting_id,
-                        "conversation": transcription["conversation"],
-                        "participants": [],  # Will be derived from conversation
-                        "language": "en-US",
-                        "duration_sec": sum((turn.get("end_time", 0) - turn.get("start_time", 0)) for turn in transcription["conversation"])
-                    },
-                    context={
-                        "tenant_id": tenant_id,
-                        "session_id": meeting_id,
-                        "platform": platform
+                            **transcription,
+                            "duration_sec": duration
+                        },
+                        context={
+                            "tenant_id": tenant_id,
+                            "session_id": meeting_id,
+                            "platform": platform
                     }
                 )
 
                 logger.info("Step 2.1: Saving meeting analysis")
-                analysis_service = await MeetingAnalysisService.from_default()
-                await analysis_service.save_analysis(meeting_analysis)
+                await analysis_service.save_analysis(analysis)
             
             else:
                 logger.info("Step 2: Meeting analysis exists, Skipping analysis")
 
-            # logger.info("Waiting for 2 seconds before meeting preparation...")
-            # time.sleep(2)
+            logger.info("Waiting for 2 seconds before meeting preparation...")
+            time.sleep(2)
 
             ############################################################
             # Step 3: Meeting Preparation with MeetingPrepCuratorService
             ############################################################
             logger.info("Step 3: Meeting prep suggestion")
-            logger.info(f"recurring_meeting_id: {recurring_meeting_id}")
-            logger.info(f"next_meeting: {next_meeting}")
             if recurring_meeting_id and next_meeting:
-                try:
-                    prep_curator_service = await MeetingPrepCuratorService.from_default()
-                    await prep_curator_service.generate_and_save_prep_pack(
-                        meeting_id=next_meeting,
-                        meeting_analysis=meeting_analysis,
-                        platform=platform,
-                        recurring_meeting_id=recurring_meeting_id,
-                        previous_meeting_counts=2,
-                        context={
-                            "current_meeting_id": meeting_id,
-                            "tenant_id": tenant_id
-                        }
-                    )
+                prep_curator_service = await MeetingPrepCuratorService.from_default()
+                await prep_curator_service.generate_and_save_prep_pack(
+                    next_meeting_id=next_meeting,
+                    meeting_analysis=analysis,
+                    meeting_metadata=meeting_metadata,
+                    platform=platform,
+                    recurring_meeting_id=recurring_meeting_id,
+                    previous_meeting_counts=2,
+                    context={
+                        "current_meeting_id": meeting_id,
+                        "tenant_id": tenant_id
+                    }
+                )
 
-                    # Update next meeting status to scheduled
-                    if platform == "google":
-                        await self._update_meeting_status(next_meeting, platform, 'scheduled')
-                        
-                except Exception as e:
-                    logger.error(f"Failed to generate prep pack: {e}")
-                    # Don't fail the entire process if prep pack generation fails
-                    
+                # Update next meeting status to scheduled
+                if platform == "google":
+                    await self._update_meeting_status(next_meeting, platform, 'scheduled')             
             else:
                 logger.info("Skipping meeting preparation - no recurring_meeting_id provided")
             

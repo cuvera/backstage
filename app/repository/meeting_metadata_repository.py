@@ -159,17 +159,19 @@ class MeetingMetadataRepository(BaseRepository):
             if start or end:
                 date_filter = {}
                 if start:
-                    date_filter["$gte"] = datetime.fromisoformat(start.replace('Z', '+00:00'))
+                    date_filter["$gte"] = start
                 if end:
-                    date_filter["$lte"] = datetime.fromisoformat(end.replace('Z', '+00:00'))
+                    date_filter["$lte"] = end
                 query["start"] = date_filter
             
+            logger.info("After Query: %s", query)
+
             # Execute query with sorting and limit
             cursor = collection.find(query).sort("start", 1)  # Sort by start time ascending
             if limit:
-                cursor = cursor.limit(limit)
+                cursor = cursor.limit(int(limit))
             
-            docs = await cursor.to_list(length=limit or 1000)
+            docs = await cursor.to_list(length=int(limit) if limit else 3)
             
             if not docs:
                 logger.warning("No meetings found for recurring_meeting_id=%s", recurring_meeting_id)
@@ -181,7 +183,7 @@ class MeetingMetadataRepository(BaseRepository):
             else:
                 meetings = docs  # Raw docs for other platforms
             
-            logger.info("Fetched %d meetings for recurring_meeting_id=%s", len(meetings), recurring_meeting_id)
+            logger.info("Fetched meetings for recurring_meeting_id=%s", recurring_meeting_id)
             return meetings
             
         except Exception as exc:
@@ -210,10 +212,7 @@ class MeetingMetadataRepository(BaseRepository):
             return None
         
         # Extract end time from current meeting
-        current_end_time = (
-            current_meeting_metadata.get("end_time") or 
-            current_meeting_metadata.get("end")
-        )
+        current_end_time = current_meeting_metadata.get("end_time")
         
         if not current_end_time:
             logger.warning("[MeetingMetadataRepository] Current meeting has no end time")
@@ -226,21 +225,14 @@ class MeetingMetadataRepository(BaseRepository):
         try:
             query = {
                 "recurringEventId": recurring_meeting_id,
-                # "status": "scheduled",
                 "start": {"$gte": current_end_time},
-                "eventId": {"$ne": current_meeting_metadata.get("id")}
             }
-            
-
-            print("Next meeting query: ", query)
-
 
             # Get immediate next meeting
             cursor = collection.find(query, {"eventId": 1}).sort("start", 1).limit(1)
             docs = await cursor.to_list(length=1)
             
             if docs:
-                print(f"Found next meeting: {docs}")
                 next_meeting_id = docs[0].get("_id")
                 logger.info("[MeetingMetadataRepository] Found immediate next meeting: %s", next_meeting_id)
                 return next_meeting_id
