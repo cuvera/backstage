@@ -15,7 +15,7 @@ You may receive:
       "end": "int"
     }
   ]
-  The values `start` and `end` represent time offsets from the beginning of the audio (usually milliseconds or seconds).
+  The values `start` and `end` represent time offsets from the beginning of the audio in milliseconds.
 
 - An optional participants mapping array `participants` that maps speaker identity to internal user IDs (and optionally email):
   [
@@ -36,8 +36,8 @@ TRANSCRIPTION & DIARIZATION
    - Break the transcript into coherent conversational segments (turns).
 
 2. For each conversational segment in `conversation`:
-   - `start_time`: numeric offset from the beginning of the audio (in seconds). If your input timestamps are in milliseconds, convert and round sensibly.
-   - `end_time`: numeric offset in seconds, ≥ start_time.
+   - `start_time`: numeric offset from the beginning of the audio in milliseconds. If your input timestamps are in milliseconds, convert and round sensibly.
+   - `end_time`: numeric offset in milliseconds, ≥ start_time.
    - `speaker`:
      - If `speakerTimeframes` is provided:
        - Map each segment to a `speakerName` whose time window overlaps most with the segment.
@@ -67,7 +67,7 @@ Perform sentiment analysis at two levels:
 
 2. Per-participant sentiment:
    - For each distinct `speaker` appearing in `conversation`:
-     - Aggregate that speaker’s contributions across all conversation turns.
+     - Aggregate that speaker's contributions across all conversation turns.
      - Assign a single sentiment label from: "positive", "negative", "neutral", or "mixed".
    - If `speakerTimeframes` and/or `participants` are provided, sentiments should be reported using the named speakers (e.g., "Gurusankar Kasivinayagam", "Jane Doe").
    - If not provided, use the `Unknown_XX` labels as they appear in `conversation`.

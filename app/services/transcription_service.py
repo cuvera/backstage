@@ -65,11 +65,7 @@ class TranscriptionService:
             # Extract conversation from transcription result
             # The conversation entries should already contain userId from the agent
             conversation = transcription_result["conversation"]
-            
-            # Extract and enhance sentiments with user IDs
-            sentiments = transcription_result.get("sentiments", {})
-            enhanced_sentiments = self._map_sentiments_to_users(sentiments, participants)
-            
+                        
             # Add transcription metadata to processing metadata
             enriched_metadata = processing_metadata or {}
             enriched_metadata.update({
@@ -84,10 +80,13 @@ class TranscriptionService:
                 "meeting_id": meeting_id,
                 "tenant_id": tenant_id,
                 "conversation": conversation,
-                 "total_speakers": transcription_result.get("total_speakers", 0),
+                "total_speakers": transcription_result.get("total_speakers", 0),
                 "sentiments": transcription_result.get("sentiments", {})
                 }, f, indent=2)
             
+            # Extract and enhance sentiments with user IDs
+            sentiments = transcription_result.get("sentiments", {})
+            enhanced_sentiments = self._map_sentiments_to_users(sentiments, participants)
 
             # Save to database using private method
             result = await self._repository.save_transcription(
@@ -95,11 +94,15 @@ class TranscriptionService:
                 tenant_id=tenant_id,
                 conversation=conversation,
                 sentiments=enhanced_sentiments,
-                processing_metadata=enriched_metadata
             )
             
             logger.info(f"Transcription completed and saved for meeting={meeting_id}")
-            return result
+            return {
+                "conversation": conversation,
+                "total_speakers": transcription_result.get("total_speakers", 0),
+                "sentiments": enhanced_sentiments,
+                "save_result": result
+            }
             
         except Exception as exc:
             logger.exception(f"Failed to transcribe and save for meeting={meeting_id}: {exc}")

@@ -121,23 +121,12 @@ class MeetingAnalysisOrchestrator:
                 audio_file_path=file_url,
                 meeting_id=meeting_id,
                 tenant_id=tenant_id,
-                meeting_metadata=meeting_info
+                meeting_metadata=meeting_info,
             )
 
-            #             # Step 6: Save transcription to database
-            # logger.info("Step 6: Saving transcription to database")
-            # transcription_service = await TranscriptionService.from_default()
-            # await transcription_service._save_transcription(
-            #     meeting_id=meeting_id,
-            #     tenant_id=tenant_id,
-            #     conversation=transcription_result["conversation"],
-            #     processing_metadata={
-            #         "total_speakers": transcription_result.get("total_speakers", 0),
-            #         "sentiments": transcription_result.get("sentiments", {}),
-            #         "transcription_agent_version": "1.0"
-            #     }
-            # )
-            
+            # Transcription saved result
+            logger.info(f"Transcription saved: {transcription_result}")
+
             # Step 4: Meeting Analysis with CallAnalysisAgent  
             logger.info("Step 4: Analyzing meeting with CallAnalysisAgent")
             
