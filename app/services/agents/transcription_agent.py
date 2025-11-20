@@ -107,28 +107,20 @@ class TranscriptionAgent:
                 response_format={"type": "json_object"},
                 temperature=0.1
             )
-            
-            # Parse JSON response (copied from orchestrator lines 244-249)
-            logger.info(f"Gemini response structure: {response}")
-            logger.info(f"Response choices: {response.choices}")
-            logger.info(f"First choice: {response.choices[0] if response.choices else 'No choices'}")
-            
+
             response_content = response.choices[0].message.content
-            logger.info(f"Response content length: {len(response_content) if response_content else 0}")
-            logger.info(f"Response content preview: {response_content[:500] if response_content else 'None'}...")
-            logger.info(f"Response content ending: ...{response_content[-200:] if response_content and len(response_content) > 200 else response_content}")
             
             if not response_content:
                 raise TranscriptionAgentError("Gemini returned empty response content")
             
             # Parse and validate JSON response
+            result = {}
             try:
-                # Strip markdown formatting if present
-                cleaned_content = response_content.strip()                
-                result = json.loads(cleaned_content)
+                # Strip markdown formatting if present    
+                result = json.loads(response_content)
             except json.JSONDecodeError as e:
                 logger.error(f"Malformed JSON strcuture, Failed to parse Gemini response as JSON: {e}")
-            
+
             # Validate required fields
             required_fields = ["conversation", "total_speakers", "sentiments"]
             for field in required_fields:

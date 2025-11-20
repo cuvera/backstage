@@ -109,7 +109,7 @@ async def _process_meeting_retry_async(payload: Dict[str, Any]) -> None:
         # 3. Call existing analyze_meeting method
         result = await orchestrator.analyze_meeting(meeting_data)
         
-        if result.get("success"):
+        if result:
             logger.info(f"Retry processing completed successfully for meeting {meeting_id}")
         else:
             logger.error(f"Retry processing failed for meeting {meeting_id}: {result.get('error')}")

@@ -1,9 +1,7 @@
 import logging
 import os
 import tempfile
-from datetime import datetime, timezone
 from typing import Dict, Any
-from unittest import result
 import time
 
 
@@ -16,6 +14,7 @@ from app.utils.s3_client import download_s3_file
 from app.core.config import settings
 from app.services.agents import TranscriptionAgent, CallAnalysisAgent
 from app.services.meeting_prep_curator_service import MeetingPrepCuratorService
+from app.messaging.producers.meeting_status_producer import send_meeting_status
 
 logger = logging.getLogger(__name__)
 
@@ -67,11 +66,12 @@ class MeetingAnalysisOrchestrator:
             ###########################################
             logger.info("Step 0: Preparing meeting context")
 
+            await self._update_meeting_status(meeting_id, platform, 'analysing', tenant_id)
+
             if platform == "google":
                 if not self.meeting_metadata_repo:
                     self.meeting_metadata_repo = await MeetingMetadataRepository.from_default()
                 
-                await self._update_meeting_status(meeting_id, platform, 'analysing')
                 meeting_metadata = await self.meeting_metadata_repo.get_meeting_metadata(meeting_id)
 
                 print(f"Meeting metadata: {meeting_metadata}")
@@ -87,7 +87,7 @@ class MeetingAnalysisOrchestrator:
                     )
 
                     if next_meeting:
-                        await self._update_meeting_status(next_meeting, platform, 'analysing')
+                        await self._update_meeting_status(next_meeting, platform, 'analysing', tenant_id)
             else:
                 meeting_metadata = {}
 
@@ -178,30 +178,26 @@ class MeetingAnalysisOrchestrator:
                     }
                 )
 
-                # Update next meeting status to scheduled
-                if platform == "google":
-                    await self._update_meeting_status(next_meeting, platform, 'scheduled')             
+                await self._update_meeting_status(next_meeting, platform, 'scheduled', tenant_id)             
             else:
                 logger.info("Skipping meeting preparation - no recurring_meeting_id provided")
             
-            result = {}
             # Update meeting status to completed on success
-            if platform == "google":
-                await self._update_meeting_status(meeting_id, platform, 'completed')
-            return result
+            await self._update_meeting_status(meeting_id, platform, 'completed', tenant_id)
+            return True
 
         except Exception as e:
             logger.error(f"Meeting processing failed for meeting {payload.get('_id', 'unknown')}: {str(e)}")
             
             if meeting_id and platform:
-                await self._update_meeting_status(str(meeting_id), platform, 'failed')
+                await self._update_meeting_status(str(meeting_id), platform, 'failed', tenant_id)
 
                 if next_meeting:
-                    await self._update_meeting_status(next_meeting, platform, 'scheduled')
+                    await self._update_meeting_status(next_meeting, platform, 'scheduled', tenant_id)
             
             raise MeetingAnalysisOrchestratorError(f"Meeting processing failed: {str(e)}") from e
 
-    async def _update_meeting_status(self, meeting_id: str, platform: str, status: str) -> None:
+    async def _update_meeting_status(self, meeting_id: str, platform: str, status: str, tenant_id: str = None) -> None:
         """Update meeting status in metadata repository for supported platforms."""
         try:
             if platform == "google":
@@ -210,6 +206,16 @@ class MeetingAnalysisOrchestrator:
                 
                 await self.meeting_metadata_repo.update_meeting_status(meeting_id, platform, status)
                 logger.info(f"Updated meeting {meeting_id} status to {status} for platform {platform}")
+            elif platform == "offline":
+                # Map internal status to RabbitMQ status
+                message_id = send_meeting_status(
+                    meeting_id=meeting_id,
+                    status=status,
+                    platform=platform,
+                    tenant_id=tenant_id,
+                    session_id=meeting_id
+                )
+                logger.info(f"Sent offline meeting {meeting_id} status {meeting_id} to RabbitMQ")
             else:
                 logger.info(f"Status update not supported for platform {platform}, meeting {meeting_id} would be {status}")
         except Exception as e:

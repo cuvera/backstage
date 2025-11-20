@@ -58,4 +58,11 @@ class RabbitMQProducer:
                 await self.connection.close()
             logger.info("RabbitMQ Producer connection closed")
 
-producer = RabbitMQProducer()
+init_producer = None
+def get_producer():
+    global init_producer
+    if init_producer is None:
+        init_producer = RabbitMQProducer()    
+    return init_producer
+
+producer = get_producer()

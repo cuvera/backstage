@@ -60,7 +60,7 @@ async def _process_meeting_async(payload: Dict[str, Any]) -> None:
         # Process the meeting
         result = await processing_service.analyze_meeting(payload)
         
-        if result["success"]:
+        if result:
             logger.info(f"Background processing completed successfully for meeting {result['meeting_id']}")
         else:
             logger.error(f"Background processing failed for meeting: {result.get('error')}")
