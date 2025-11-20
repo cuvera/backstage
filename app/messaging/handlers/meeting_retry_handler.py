@@ -112,7 +112,7 @@ async def _process_meeting_retry_async(payload: Dict[str, Any]) -> None:
         if result:
             logger.info(f"Retry processing completed successfully for meeting {meeting_id}")
         else:
-            logger.error(f"Retry processing failed for meeting {meeting_id}: {result.get('error')}")
+            logger.error(f"Retry processing failed for meeting {meeting_id}")
             
     except ValueError as e:
         # Validation errors (meeting not found, can't be retried, etc.)
