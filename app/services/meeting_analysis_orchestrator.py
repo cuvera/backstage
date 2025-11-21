@@ -275,6 +275,7 @@ class MeetingAnalysisOrchestrator:
         """Prepare audio file for processing."""
         bucket = payload.get('bucket', settings.MEETING_BUCKET_NAME)
         temp_dir = tempfile.mkdtemp(prefix="audio_merge_", suffix=datetime.now().strftime("_%Y%m%d_%H%M%S"))
+        file_url = None
         
         if not payload.get('fileUrl'):
             s3_folder_path = f"{payload.get('tenantId')}/{payload.get('platform')}/{payload.get('_id')}/"
@@ -287,18 +288,11 @@ class MeetingAnalysisOrchestrator:
                 temp_dir=temp_dir
             )
             file_url = merge_result['local_merged_file_path']
-            temp_directory = merge_result['temp_directory']
-
-            merge_result = {
-                'local_merged_file_path': file_url,
-                'temp_directory': temp_directory
-            }
         else:
             file_url = os.path.join(temp_dir, "merged_output.wav")
             await download_s3_file(payload.get('fileUrl'), file_url, bucket)
-            merge_result = {
-                'local_merged_file_path': file_url,
-                'temp_directory': temp_dir
-            }
 
-        return merge_result
+        return {
+            'local_merged_file_path': file_url,
+            'temp_directory': temp_dir
+        }
