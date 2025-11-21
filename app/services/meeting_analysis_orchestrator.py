@@ -3,7 +3,8 @@ import os
 import tempfile
 from typing import Dict, Any
 import time
-
+from datetime import datetime
+import shutil
 
 from app.schemas.meeting_analysis import MeetingAnalysis
 from app.services.transcription_service import TranscriptionService
@@ -54,11 +55,14 @@ class MeetingAnalysisOrchestrator:
         tenant_id = payload.get('tenantId')
         platform = payload.get('platform')
         recurring_meeting_id = payload.get('recurring_meeting_id')
-        next_meeting = None
 
         if not all([meeting_id, tenant_id, platform]):
             logger.error("Missing required fields in payload: _id, tenantId, platform")
             return
+
+        next_meeting = None
+        file_url = None
+        temp_directory = None
 
         try:
             ###########################################
@@ -103,6 +107,7 @@ class MeetingAnalysisOrchestrator:
                 prepare_audio_file = await self._prepare_audio_file(payload)
 
                 file_url = prepare_audio_file.get("local_merged_file_path")
+                temp_directory = prepare_audio_file.get("temp_directory")
                 if not file_url:
                     raise MeetingAnalysisOrchestratorError("Failed to prepare audio file")
 
@@ -195,6 +200,17 @@ class MeetingAnalysisOrchestrator:
                     await self._update_meeting_status(next_meeting, platform, 'scheduled', tenant_id)
             
             raise MeetingAnalysisOrchestratorError(f"Meeting processing failed: {str(e)}") from e
+        finally:
+            try:
+                if file_url and os.path.exists(file_url):
+                    os.remove(file_url)
+                    logger.info(f"Cleaned up temporary file {file_url}")
+
+                if temp_directory and os.path.exists(temp_directory):
+                    shutil.rmtree(temp_directory)
+                    logger.info(f"Cleaned up temporary directory {temp_directory}")
+            except Exception as e:
+                logger.error(f"Failed to clean up temporary file {file_url}: {str(e)}")
 
     async def _update_meeting_status(self, meeting_id: str, platform: str, status: str, tenant_id: str = None) -> None:
         """Update meeting status in metadata repository for supported platforms."""
@@ -207,7 +223,7 @@ class MeetingAnalysisOrchestrator:
                 logger.info(f"Updated meeting {meeting_id} status to {status} for platform {platform}")
             elif platform == "offline":
                 # Map internal status to RabbitMQ status
-                message_id = send_meeting_status(
+                send_meeting_status(
                     meeting_id=meeting_id,
                     status=status,
                     platform=platform,
@@ -223,7 +239,8 @@ class MeetingAnalysisOrchestrator:
     async def _prepare_audio_file(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Prepare audio file for processing."""
         bucket = payload.get('bucket', settings.MEETING_BUCKET_NAME)
-
+        temp_dir = tempfile.mkdtemp(prefix="audio_merge_", suffix=datetime.now().strftime("_%Y%m%d_%H%M%S"))
+        
         if not payload.get('fileUrl'):
             s3_folder_path = f"{payload.get('tenantId')}/{payload.get('platform')}/{payload.get('_id')}/"
             output_s3_key = f"{payload.get('tenantId')}/{payload.get('platform')}/{payload.get('_id')}/meeting.wav"
@@ -231,11 +248,17 @@ class MeetingAnalysisOrchestrator:
             merge_result = await merge_wav_files_from_s3(
                 s3_folder_path=s3_folder_path,
                 output_s3_key=output_s3_key,
-                bucket_name=bucket
+                bucket_name=bucket,
+                temp_dir=temp_dir
             )
             file_url = merge_result['local_merged_file_path']
+            temp_directory = merge_result['temp_directory']
+
+            merge_result = {
+                'local_merged_file_path': file_url,
+                'temp_directory': temp_directory
+            }
         else:
-            temp_dir = tempfile.mkdtemp(prefix="audio_merge_")
             file_url = os.path.join(temp_dir, "merged_output.wav")
             await download_s3_file(payload.get('fileUrl'), file_url, bucket)
             merge_result = {

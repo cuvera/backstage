@@ -28,7 +28,7 @@ async def merge_wav_files_from_s3(
     bucket_name: Optional[str] = None,
     file_extension: str = ".wav",
     sort_files: bool = True,
-    cleanup_temp: bool = True
+    temp_dir: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Merge all WAV files from an S3 folder into a single audio file.
@@ -48,7 +48,6 @@ async def merge_wav_files_from_s3(
         AudioMergerError: For various audio processing errors
     """
     bucket = bucket_name or settings.S3_BUCKET_NAME
-    temp_dir = None
     
     try:
         print("Starting audio merge for folder: s3://{bucket}/{s3_folder_path}")
@@ -60,10 +59,6 @@ async def merge_wav_files_from_s3(
             bucket_name=bucket,
             file_extension=file_extension
         )
-
-        # Create temporary directory for processing
-        temp_dir = tempfile.mkdtemp(prefix="audio_merge_")
-        logger.info(f"Created temporary directory: {temp_dir}")
         
         if not wav_files:
             raise AudioMergerError(f"No {file_extension} files found in s3://{bucket}/{s3_folder_path}")
@@ -93,6 +88,7 @@ async def merge_wav_files_from_s3(
                 "total_files_merged": len(wav_files),
                 "total_duration_seconds": duration_seconds,
                 "file_size_bytes": file_size,
+                "temp_directory": temp_dir,
                 "bucket_name": bucket
             }
             
@@ -160,13 +156,15 @@ async def merge_wav_files_from_s3(
     finally:
         logger.info("Audio merge completed. Don't forget to clean the files")
         # Cleanup temporary files
-        # if cleanup_temp and temp_dir and os.path.exists(temp_dir):
-        #     try:
-        #         import shutil
-        #         shutil.rmtree(temp_dir)
-        #         logger.info(f"Cleaned up temporary directory: {temp_dir}")
-        #     except Exception as e:
-        #         logger.warning(f"Failed to cleanup temporary directory {temp_dir}: {e}")
+        if temp_dir and os.path.exists(temp_dir):
+            import shutil
+            try:
+                for file in os.listdir(temp_dir):
+                    if file != "merged_output.wav":
+                        shutil.rmtree(os.path.join(temp_dir, file))
+                        logger.info(f"Cleaned up file: {file}")
+            except Exception as e:
+                logger.warning(f"Failed to cleanup temporary directory {temp_dir}: {e}")
 
 
 async def list_wav_files_in_s3_folder(
