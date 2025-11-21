@@ -163,8 +163,6 @@ class MeetingMetadataRepository(BaseRepository):
                 if end:
                     date_filter["$lte"] = end
                 query["start"] = date_filter
-            
-            logger.info("After Query: %s", query)
 
             # Execute query with sorting and limit
             cursor = collection.find(query).sort("start", 1)  # Sort by start time ascending

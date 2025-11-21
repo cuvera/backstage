@@ -184,7 +184,7 @@ class MeetingPrepCuratorService:
         """
         # Only fetch from MongoDB for online platforms
         if platform != "offline" and platform == "google":
-            logger.info("Fetching meeting metadata from MongoDB for platform=%s, meeting_id=%s", platform, meeting_id)
+            logger.info("Fetching meeting metadata for platform=%s, meeting_id=%s", platform, meeting_id)
             
             if self._metadata_repository:
                 meeting_data = await self._metadata_repository.get_meeting_metadata(meeting_id, platform)
@@ -192,7 +192,7 @@ class MeetingPrepCuratorService:
                 if meeting_data:
                     return meeting_data
                 
-                logger.warning("Failed to fetch meeting metadata from MongoDB, using placeholder data")
+                logger.warning("Failed to fetch meeting metadata, using placeholder data")
         
         # Return None for offline or when MongoDB query fails
         return None
@@ -229,14 +229,12 @@ class MeetingPrepCuratorService:
             start=from_date,
             end=to_date,
         )
-
-        print(f"Recurrning: {meetings_data}")
         
         if meetings_data and isinstance(meetings_data, list):
-            logger.info("Fetched %d previous meetings from MongoDB", len(meetings_data))
+            logger.info("Fetched %d previous meetings", len(meetings_data))
             return meetings_data[:count]  # Ensure we don't exceed requested count
         
-        logger.warning("Failed to fetch previous meetings from MongoDB or no meetings found")
+        logger.warning("Failed to fetch previous meetings or no meetings found")
         return []
 
     async def _get_meeting_analyses(self, meetings: List[Dict[str, Any]]) -> List[MeetingAnalysis]:

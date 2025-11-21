@@ -1,6 +1,7 @@
 import logging
 import os
 import tempfile
+import time
 from typing import Dict, List, Optional, Any
 import asyncio
 from pathlib import Path
@@ -50,8 +51,17 @@ async def merge_wav_files_from_s3(
     bucket = bucket_name or settings.S3_BUCKET_NAME
     
     try:
-        print("Starting audio merge for folder: s3://{bucket}/{s3_folder_path}")
-        logger.info(f"Starting audio merge for folder: s3://{bucket}/{s3_folder_path}")
+        merge_start_time = time.time()
+        logger.info(
+            "Starting audio merge operation",
+            extra={
+                "s3_folder_path": s3_folder_path,
+                "bucket_name": bucket,
+                "output_s3_key": output_s3_key,
+                "file_extension": file_extension,
+                "sort_files": sort_files
+            }
+        )
         
         # Get list of WAV files in the S3 folder
         wav_files = await list_wav_files_in_s3_folder(
@@ -66,15 +76,36 @@ async def merge_wav_files_from_s3(
         if sort_files:
             wav_files.sort()
         
-        logger.info(f"Found {len(wav_files)} files to merge: {wav_files}")        
+        logger.info(
+            "Audio files discovered for merging",
+            extra={
+                "files_count": len(wav_files),
+                "files_list": wav_files,
+                "bucket_name": bucket,
+                "s3_folder_path": s3_folder_path
+            }
+        )
 
         meeting_file = next((file for file in wav_files if Path(file).name == "meeting.wav"), None)
         if meeting_file:
-            print("Meeting file already exists in s3://{bucket}/{s3_folder_path}")
+            logger.info(
+                "Pre-merged meeting file found, downloading directly",
+                extra={
+                    "meeting_file_s3_key": meeting_file,
+                    "bucket_name": bucket,
+                    "temp_dir": temp_dir
+                }
+            )
             file_path = os.path.join(temp_dir, "merged_output.wav")
             await download_s3_file(meeting_file, file_path, bucket)
 
-            print("Meeting file downloaded successfully")
+            logger.debug(
+                "Meeting file downloaded successfully",
+                extra={
+                    "local_file_path": file_path,
+                    "s3_key": meeting_file
+                }
+            )
             file_size = os.path.getsize(file_path)
 
             # Calculate metadata
@@ -92,7 +123,16 @@ async def merge_wav_files_from_s3(
                 "bucket_name": bucket
             }
             
-            logger.info(f"Audio parse completed successfully: {result}")
+            logger.info(
+                "Audio processing completed (pre-merged file)",
+                extra={
+                    "total_duration_seconds": duration_seconds,
+                    "file_size_bytes": file_size,
+                    "total_files_found": len(wav_files),
+                    "processing_time_ms": round((time.time() - merge_start_time) * 1000, 2),
+                    "temp_directory": temp_dir
+                }
+            )
             return result
         else:
             # Download all files concurrently
@@ -114,9 +154,24 @@ async def merge_wav_files_from_s3(
             
             if failed_downloads:
                 failed_files = [s3_key for s3_key, _ in failed_downloads]
+                logger.error(
+                    "Failed to download audio files from S3",
+                    extra={
+                        "failed_files": failed_files,
+                        "failed_count": len(failed_files),
+                        "total_files": len(wav_files),
+                        "bucket_name": bucket
+                    }
+                )
                 raise AudioMergerError(f"Failed to download files: {failed_files}")
             
-            logger.info("All files downloaded successfully")
+            logger.info(
+                "All audio files downloaded successfully",
+                extra={
+                    "downloaded_files_count": len(wav_files),
+                    "temp_directory": temp_dir
+                }
+            )
             
             # Validate and merge audio files
             merged_audio, sample_rate = await merge_local_audio_files(local_files)
@@ -129,8 +184,24 @@ async def merge_wav_files_from_s3(
         
             # Upload merged file to S3
             if output_s3_key:
+                logger.debug(
+                    "Uploading merged audio file to S3",
+                    extra={
+                        "local_file": merged_file_path,
+                        "s3_key": output_s3_key,
+                        "bucket_name": bucket
+                    }
+                )
                 upload_success = await upload_to_s3(merged_file_path, output_s3_key, bucket)
                 if not upload_success:
+                    logger.error(
+                        "Failed to upload merged file to S3",
+                        extra={
+                            "s3_key": output_s3_key,
+                            "bucket_name": bucket,
+                            "local_file": merged_file_path
+                        }
+                    )
                     raise AudioMergerError(f"Failed to upload merged file to s3://{bucket}/{output_s3_key}")
         
             # Calculate metadata
@@ -146,25 +217,74 @@ async def merge_wav_files_from_s3(
                 "bucket_name": bucket
             }
         
-            logger.info(f"Audio merge completed successfully: {result}")
+            logger.info(
+                "Audio merge completed successfully",
+                extra={
+                    "total_files_merged": len(wav_files),
+                    "total_duration_seconds": duration_seconds,
+                    "file_size_bytes": file_size,
+                    "processing_time_ms": round((time.time() - merge_start_time) * 1000, 2),
+                    "output_s3_key": output_s3_key,
+                    "bucket_name": bucket
+                }
+            )
             return result
         
     except Exception as e:
-        logger.error(f"Audio merge failed: {str(e)}")
+        logger.error(
+            "Audio merge operation failed",
+            extra={
+                "s3_folder_path": s3_folder_path,
+                "bucket_name": bucket,
+                "output_s3_key": output_s3_key,
+                "error_type": type(e).__name__,
+                "temp_directory": temp_dir if 'temp_dir' in locals() else None,
+                "processing_time_ms": round((time.time() - merge_start_time) * 1000, 2) if 'merge_start_time' in locals() else None
+            },
+            exc_info=True
+        )
         raise AudioMergerError(f"Audio merge operation failed: {str(e)}") from e
     
     finally:
-        logger.info("Audio merge completed. Don't forget to clean the files")
-        # Cleanup temporary files
+        cleanup_start_time = time.time()
+        cleaned_files_count = 0
+        
+        # Cleanup temporary files (except merged_output.wav which orchestrator handles)
         if temp_dir and os.path.exists(temp_dir):
             import shutil
             try:
                 for file in os.listdir(temp_dir):
                     if file != "merged_output.wav":
-                        shutil.rmtree(os.path.join(temp_dir, file))
-                        logger.info(f"Cleaned up file: {file}")
+                        file_path = os.path.join(temp_dir, file)
+                        if os.path.isfile(file_path):
+                            os.remove(file_path)
+                            cleaned_files_count += 1
+                            logger.debug(f"Cleaned up intermediate file: {file}")
+                        elif os.path.isdir(file_path):
+                            shutil.rmtree(file_path)
+                            cleaned_files_count += 1
+                            logger.debug(f"Cleaned up intermediate directory: {file}")
+                
+                if cleaned_files_count > 0:
+                    logger.info(
+                        "Intermediate files cleaned up",
+                        extra={
+                            "cleaned_files_count": cleaned_files_count,
+                            "temp_directory": temp_dir,
+                            "cleanup_duration_ms": round((time.time() - cleanup_start_time) * 1000, 2),
+                            "preserved_file": "merged_output.wav"
+                        }
+                    )
             except Exception as e:
-                logger.warning(f"Failed to cleanup temporary directory {temp_dir}: {e}")
+                logger.warning(
+                    "Failed to cleanup intermediate files",
+                    extra={
+                        "temp_directory": temp_dir,
+                        "error_type": type(e).__name__,
+                        "cleanup_step": "finally_block"
+                    },
+                    exc_info=True
+                )
 
 
 async def list_wav_files_in_s3_folder(
@@ -192,7 +312,14 @@ async def list_wav_files_in_s3_folder(
         if not s3_folder_path.endswith('/'):
             s3_folder_path += '/'
         
-        logger.info(f"Listing files in s3://{bucket}/{s3_folder_path}")
+        logger.debug(
+            "Listing files in S3 folder",
+            extra={
+                "bucket_name": bucket,
+                "s3_folder_path": s3_folder_path,
+                "file_extension": file_extension
+            }
+        )
         
         paginator = s3_client.get_paginator('list_objects_v2')
         pages = paginator.paginate(Bucket=bucket, Prefix=s3_folder_path)
@@ -206,11 +333,28 @@ async def list_wav_files_in_s3_folder(
                     if not key.endswith('/') and key.lower().endswith(file_extension.lower()):
                         audio_files.append(key)
         
-        logger.info(f"Found {len(audio_files)} {file_extension} files")
+        logger.info(
+            "S3 file listing completed",
+            extra={
+                "files_found": len(audio_files),
+                "file_extension": file_extension,
+                "bucket_name": bucket,
+                "s3_folder_path": s3_folder_path
+            }
+        )
         return audio_files
         
     except Exception as e:
-        logger.error(f"Failed to list files in s3://{bucket}/{s3_folder_path}: {e}")
+        logger.error(
+            "Failed to list S3 files",
+            extra={
+                "bucket_name": bucket,
+                "s3_folder_path": s3_folder_path,
+                "file_extension": file_extension,
+                "error_type": type(e).__name__
+            },
+            exc_info=True
+        )
         raise AudioMergerError(f"Failed to list S3 files: {str(e)}") from e
 
 async def merge_local_audio_files(file_paths: List[str]) -> tuple[np.ndarray, int]:
@@ -226,7 +370,14 @@ async def merge_local_audio_files(file_paths: List[str]) -> tuple[np.ndarray, in
     if not file_paths:
         logger.info("No files provided for merging")
     
-    logger.info(f"Merging {len(file_paths)} audio files")
+    logger.info(
+        "Starting local audio file merge",
+        extra={
+            "files_count": len(file_paths),
+            "file_paths": file_paths
+        }
+    )
+    merge_start_time = time.time()
     
     merged_audio = None
     sample_rate = None
@@ -251,8 +402,16 @@ async def merge_local_audio_files(file_paths: List[str]) -> tuple[np.ndarray, in
                 # Resample if needed (basic implementation)
                 logger.warning(f"Sample rate mismatch: {sr} vs {sample_rate}. Using first file's rate.")
             
-            logger.debug(f"Loaded audio file {i+1}/{len(file_paths)}: {file_path} "
-                        f"(duration: {len(signal)/sr:.2f}s)")
+            logger.debug(
+                "Audio file processed",
+                extra={
+                    "file_index": i + 1,
+                    "total_files": len(file_paths),
+                    "file_path": file_path,
+                    "duration_seconds": round(len(signal) / sr, 2),
+                    "sample_rate": sr
+                }
+            )
             
             # Merge with previous audio
             if merged_audio is None:
@@ -261,13 +420,30 @@ async def merge_local_audio_files(file_paths: List[str]) -> tuple[np.ndarray, in
                 merged_audio = np.concatenate([merged_audio, signal])
                 
         except Exception as e:
-            logger.error(f"Failed to process audio file {file_path}: {e}")
+            logger.error(
+                "Failed to process audio file",
+                extra={
+                    "file_path": file_path,
+                    "file_index": i + 1,
+                    "total_files": len(file_paths),
+                    "error_type": type(e).__name__
+                },
+                exc_info=True
+            )
             raise AudioMergerError(f"Failed to process audio file {file_path}: {str(e)}") from e
     
     if merged_audio is None:
         logger.info("No audio content was merged")
     
-    logger.info(f"Successfully merged audio (total duration: {len(merged_audio)/sample_rate:.2f}s)")
+    logger.info(
+        "Local audio merge completed successfully",
+        extra={
+            "total_files_merged": len(file_paths),
+            "total_duration_seconds": round(len(merged_audio) / sample_rate, 2),
+            "sample_rate": sample_rate,
+            "processing_time_ms": round((time.time() - merge_start_time) * 1000, 2)
+        }
+    )
     return merged_audio, sample_rate
 
 
