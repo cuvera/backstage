@@ -127,9 +127,9 @@ class MeetingAnalysisOrchestrator:
             logger.info("Step 2: Meeting Analysis with CallAnalysisAgent")
 
             analysis_service = await MeetingAnalysisService.from_default()
-            analysis = await analysis_service.get_analysis(tenant_id=tenant_id, session_id=meeting_id)
+            analysis_doc = await analysis_service.get_analysis(tenant_id=tenant_id, session_id=meeting_id)
 
-            if not analysis:
+            if not analysis_doc:
                 call_analysis_agent = CallAnalysisAgent()
 
                 # duration in seconds, last turn end time - first turn start time
@@ -152,10 +152,9 @@ class MeetingAnalysisOrchestrator:
 
                 logger.info("Step 2.1: Saving meeting analysis")
                 await analysis_service.save_analysis(analysis)
-            
             else:
-                logger.info("Step 2: Meeting analysis exists, Skipping analysis")
-
+                analysis = MeetingAnalysis(**analysis_doc)
+            
             logger.info("Waiting for 2 seconds before meeting preparation...")
             time.sleep(2)
 

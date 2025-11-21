@@ -79,11 +79,11 @@ class MeetingPrepCuratorService:
                 platform=platform,
                 to_date=meeting_metadata.get("start_time")
             )
-            previous_analyses = await self._get_meeting_analyses(previous_meetings)
-            
+            previous_analyses: List[MeetingAnalysis] = await self._get_meeting_analyses(previous_meetings)
+
             # Add current meeting to previous meetings and it's analysis
             previous_meetings.append(meeting_metadata)
-            previous_analyses.append(MeetingAnalysis(**meeting_analysis))
+            previous_analyses.append(meeting_analysis)
 
             # Generate prep pack using agent
             prep_pack = await self._agent.generate_prep_pack(
