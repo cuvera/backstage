@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import time
 from typing import Any, Dict, List, Optional
 
 from app.core.openai_client import llm_client
@@ -78,7 +79,10 @@ class TranscriptionAgent:
 
             context_message = "\n".join(context_parts)
             
-            # Make API call to Gemini (copied from orchestrator lines 211-237)
+            # Make API call to Gemini with timing
+            logger.info("[TranscriptionAgent] Starting LLM call")
+            llm_start_time = time.time()
+
             response = await self.client.chat.completions.create(
                 model=self.model,
                 reasoning_effort="low",
@@ -107,6 +111,9 @@ class TranscriptionAgent:
                 response_format={"type": "json_object"},
                 temperature=0.1
             )
+
+            llm_duration_ms = round((time.time() - llm_start_time) * 1000, 2)
+            logger.info(f"[TranscriptionAgent] LLM call completed in {llm_duration_ms}ms")
 
             response_content = response.choices[0].message.content
             

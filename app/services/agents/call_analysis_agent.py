@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from collections import defaultdict
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional
@@ -231,6 +232,9 @@ class CallAnalysisAgent:
         return f"{header}\n{metadata}\nTranscript:\n{transcript_block}"
 
     async def _call_llm(self, prompt: str) -> str:
+        logger.info("[CallAnalysisAgent] Starting LLM call")
+        llm_start_time = time.time()
+        
         try:
             response = await self.llm.chat.completions.create(
                 model="gemini-2.5-pro",
@@ -241,8 +245,13 @@ class CallAnalysisAgent:
                 temperature=0.1,
             )
             text = response.choices[0].message.content
+            
+            llm_duration_ms = round((time.time() - llm_start_time) * 1000, 2)
+            logger.info(f"[CallAnalysisAgent] LLM call completed in {llm_duration_ms}ms")
+            
         except Exception as exc:
-            logger.exception("[CallAnalysisAgent] LLM call failed: %s", exc)
+            llm_duration_ms = round((time.time() - llm_start_time) * 1000, 2)
+            logger.error(f"[CallAnalysisAgent] LLM call failed after {llm_duration_ms}ms: {exc}")
             raise CallAnalysisAgentError(f"llm call failed: {exc}") from exc
 
         if not text:

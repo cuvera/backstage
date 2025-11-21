@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from app.core.prompts import MEETING_PREP_SUGGESTION_PROMPT
@@ -88,28 +89,40 @@ class MeetingPrepAgent:
 
         context_message = "\n".join(context_parts)
 
-        # Make API call to Gemini (copied from orchestrator lines 211-237)
-        response = await self.client.chat.completions.create(
-            model=self.model,
-            reasoning_effort="low",
-            messages=[
-                {
-                    "role": "system",
-                    "content": MEETING_PREP_SUGGESTION_PROMPT
-                },
-                {
-                    "role": "user", 
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": context_message
-                        }
-                    ]
-                }
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.1
-        )
+        # Make API call to Gemini with timing
+        logger.info("[MeetingPrepAgent] Starting LLM call")
+        llm_start_time = time.time()
+
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                reasoning_effort="low",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": MEETING_PREP_SUGGESTION_PROMPT
+                    },
+                    {
+                        "role": "user", 
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": context_message
+                            }
+                        ]
+                    }
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.1
+            )
+            
+            llm_duration_ms = round((time.time() - llm_start_time) * 1000, 2)
+            logger.info(f"[MeetingPrepAgent] LLM call completed in {llm_duration_ms}ms")
+            
+        except Exception as exc:
+            llm_duration_ms = round((time.time() - llm_start_time) * 1000, 2)
+            logger.error(f"[MeetingPrepAgent] LLM call failed after {llm_duration_ms}ms: {exc}")
+            raise MeetingPrepAgentError(f"prep pack generation failed: {exc}") from exc
         
         # Build and validate prep pack
         prep_pack = self._build_prep_pack(
