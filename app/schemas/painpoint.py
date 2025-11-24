@@ -70,7 +70,7 @@ class PainPoint(PainPointBase):
     Read/back model. Mirrors what you'll have in Mongo (normalized).
     `_id` is exposed as `id` via alias for convenience in Python.
     """
-    id: str | None = Field(None, alias="_id")
+    id: Optional[str] = Field(None, alias="_id")
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 

@@ -49,8 +49,9 @@ class MeetingPrepCuratorService:
 
     async def generate_and_save_prep_pack(
         self,
-        meeting_id: str,
+        next_meeting_id: str,
         meeting_analysis: MeetingAnalysis,
+        meeting_metadata: Dict[str, Any],
         platform: str,
         *,
         recurring_meeting_id: Optional[str] = None,
@@ -70,39 +71,16 @@ class MeetingPrepCuratorService:
         Returns:
             Dictionary with save result and prep pack data
         """
-        try:
-            print(f"Platform: {platform}")
-            # Only for online platforms (currently supporting Google's recurring meetings)
-            if platform != "google":
-                logger.warning("Meeting Prep Service is not implemented for platform=%s", platform)
-                return {
-                    "status": "skipped",
-                    "prep_pack": None,
-                    "save_result": None,
-                }
-
-            # Fetch meeting metadata based on platform
-            meeting_metadata = await self._get_meeting_metadata(meeting_id, platform)
-            print(f"Meeting Metadata: {meeting_metadata}")
-
-            # Resolve recurring meeting ID
-            resolved_recurring_id = self._resolve_recurring_meeting_id(
-                meeting_metadata, recurring_meeting_id
-            )
-            print(f"Resolved Recurring ID: {resolved_recurring_id}")
-            
+        try:            
             # Fetch previous meetings and their analyses based on platform
             previous_meetings = await self._get_previous_meetings(
-                recurring_meeting_id=resolved_recurring_id, 
+                recurring_meeting_id=recurring_meeting_id, 
                 count = previous_meeting_counts, 
                 platform=platform,
                 to_date=meeting_metadata.get("start_time")
             )
+            previous_analyses: List[MeetingAnalysis] = await self._get_meeting_analyses(previous_meetings)
 
-            print(f"Previous Meetings: {previous_meetings}")
-            previous_analyses = await self._get_meeting_analyses(previous_meetings)
-            print(f"Previous Analyses: {previous_analyses}")
-            
             # Add current meeting to previous meetings and it's analysis
             previous_meetings.append(meeting_metadata)
             previous_analyses.append(meeting_analysis)
@@ -111,38 +89,13 @@ class MeetingPrepCuratorService:
             prep_pack = await self._agent.generate_prep_pack(
                 meeting_metadata=meeting_metadata,
                 previous_analyses=previous_analyses,
-                recurring_meeting_id=resolved_recurring_id,
+                recurring_meeting_id=recurring_meeting_id,
                 previous_meetings=previous_meetings,
                 context=context,
             )
-            print(f"Prep Pack: {prep_pack}")
-
-            # Find immediate next meeting using already-fetched current meeting data
-            next_meeting_id = await self._find_immediate_next_meeting(
-                meeting_metadata,
-                resolved_recurring_id,
-                platform
-            )
-            print(f"Next Meeting ID: {next_meeting_id}")
-
-            # Use next meeting ID if found, otherwise use current meeting_id
-            target_meeting_id = next_meeting_id or meeting_id
             
             # Save to MongoDB using repository
-            save_result = await self.save_prep_pack(prep_pack, target_meeting_id)
-            
-            logger.info(
-                "[MeetingPrepCuratorService] Generated prep pack for meeting=%s, saved for target=%s (next=%s), recurring=%s",
-                meeting_id,
-                target_meeting_id,
-                "found" if next_meeting_id else "not found",
-                prep_pack.recurring_meeting_id,
-            )
-            
-            return {
-                "prep_pack": prep_pack.model_dump(),
-                "save_result": save_result,
-            }
+            await self.save_prep_pack(prep_pack, next_meeting_id)
             
         except MeetingPrepAgentError as exc:
             logger.error("[MeetingPrepCuratorService] Agent error: %s", exc)
@@ -231,7 +184,7 @@ class MeetingPrepCuratorService:
         """
         # Only fetch from MongoDB for online platforms
         if platform != "offline" and platform == "google":
-            logger.info("Fetching meeting metadata from MongoDB for platform=%s, meeting_id=%s", platform, meeting_id)
+            logger.info("Fetching meeting metadata for platform=%s, meeting_id=%s", platform, meeting_id)
             
             if self._metadata_repository:
                 meeting_data = await self._metadata_repository.get_meeting_metadata(meeting_id, platform)
@@ -239,7 +192,7 @@ class MeetingPrepCuratorService:
                 if meeting_data:
                     return meeting_data
                 
-                logger.warning("Failed to fetch meeting metadata from MongoDB, using placeholder data")
+                logger.warning("Failed to fetch meeting metadata, using placeholder data")
         
         # Return None for offline or when MongoDB query fails
         return None
@@ -276,14 +229,12 @@ class MeetingPrepCuratorService:
             start=from_date,
             end=to_date,
         )
-
-        print(f"Recurrning: {meetings_data}")
         
         if meetings_data and isinstance(meetings_data, list):
-            logger.info("Fetched %d previous meetings from MongoDB", len(meetings_data))
+            logger.info("Fetched %d previous meetings", len(meetings_data))
             return meetings_data[:count]  # Ensure we don't exceed requested count
         
-        logger.warning("Failed to fetch previous meetings from MongoDB or no meetings found")
+        logger.warning("Failed to fetch previous meetings or no meetings found")
         return []
 
     async def _get_meeting_analyses(self, meetings: List[Dict[str, Any]]) -> List[MeetingAnalysis]:

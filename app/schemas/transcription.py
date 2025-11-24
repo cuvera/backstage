@@ -1,6 +1,27 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+from bson.objectid import ObjectId
 from pydantic import BaseModel, Field
+from enum import Enum
+
+class SentimentLabel(str, Enum):
+    """Sentiment analysis labels."""
+    positive = "positive"
+    negative = "negative" 
+    neutral = "neutral"
+    mixed = "mixed"
+
+class ParticipantSentiment(BaseModel):
+    """Sentiment analysis for individual participant."""
+    name: str = Field(..., description="Participant name")
+    user_id: Optional[str] = Field(None, description="User ID if available") 
+    sentiment: SentimentLabel = Field(..., description="Sentiment label for this participant")
+
+
+class SentimentOverview(BaseModel):
+    """Complete sentiment analysis overview."""
+    overall: SentimentLabel = Field(..., description="Overall meeting sentiment")
+    participant: List[ParticipantSentiment] = Field(default_factory=list, description="Per-participant sentiments")
 
 
 class TranscriptionEntry(BaseModel):
@@ -10,6 +31,7 @@ class TranscriptionEntry(BaseModel):
     speaker: str = Field(..., description="Speaker identifier/name")
     text: str = Field(..., description="Transcribed text")
     identification_score: float = Field(..., description="Confidence score for speaker identification")
+    user_id: Optional[str] = Field(None, description="Optional user identifier")
 
 
 class ProcessingMetadata(BaseModel):
@@ -25,6 +47,7 @@ class TranscriptionDocument(BaseModel):
     tenant_id: str = Field(..., description="Tenant identifier for security")
     conversation: List[TranscriptionEntry] = Field(..., description="List of transcription entries")
     total_speakers: int = Field(..., description="Total number of unique speakers detected")
+    sentiments: SentimentOverview = Field(..., description="Sentiment analysis overview")
     processing_metadata: ProcessingMetadata = Field(..., description="Processing metadata")
     created_at: datetime = Field(default_factory=datetime.utcnow, description="Document creation timestamp")
     updated_at: datetime = Field(default_factory=datetime.utcnow, description="Document update timestamp")
