@@ -52,7 +52,8 @@ async def _process_meeting_async(payload: Dict[str, Any]) -> None:
     """
     processing_service = None
     try:
-        logger.info(f"Starting background processing for meeting {payload.get('_id', 'unknown')}")
+        meeting_id = payload.get('_id', 'unknown')
+        logger.info(f"Starting background processing for meeting {meeting_id}")
         
         # Initialize processing service
         processing_service = MeetingAnalysisOrchestrator()
@@ -60,10 +61,10 @@ async def _process_meeting_async(payload: Dict[str, Any]) -> None:
         # Process the meeting
         result = await processing_service.analyze_meeting(payload)
         
-        if result["success"]:
-            logger.info(f"Background processing completed successfully for meeting {result['meeting_id']}")
+        if result:
+            logger.info(f"Background processing completed successfully for meeting {meeting_id}")
         else:
-            logger.error(f"Background processing failed for meeting: {result.get('error')}")
+            logger.error(f"Background processing failed for meeting: {meeting_id}")
             
     except MeetingAlreadyProcessedException as e:
         logger.info(f"Meeting already processed or being processed: {e}")

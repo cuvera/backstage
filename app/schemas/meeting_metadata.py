@@ -44,6 +44,7 @@ class MeetingMetadata(BaseModel):
     status: str
     hangout_link: Optional[str] = None
     file_url: Optional[str] = None
+    attendees: List[str] = []
     speaker_timeframes: Optional[List[SpeakerTimeframe]] = None
     created_at: datetime
     updated_at: datetime
@@ -70,6 +71,7 @@ def google_meeting_to_metadata(doc: Dict[str, Any]) -> MeetingMetadata:
         status=doc.get("status", ""),
         hangout_link=doc.get("hangoutLink"),
         file_url=doc.get("fileUrl"),
+        attendees=doc.get("attendees", []),
         speaker_timeframes=[
             SpeakerTimeframe(**tf) for tf in doc.get("speakerTimeframes", [])
         ] if doc.get("speakerTimeframes") else None,

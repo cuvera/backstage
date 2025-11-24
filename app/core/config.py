@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     MONGODB_URL: str = Field(default="mongodb://localhost:27017", env="MONGODB_URL")
     DATABASE_NAME: str = Field(default="intelligence_db", env="DATABASE_NAME")
     
+    AUTH_SERVICE_URL: Optional[str] = Field(default=None, env="AUTH_SERVICE_URL")
 
     
     DEFAULT_LLM_PROVIDER: str = Field(default="gemini", env="DEFAULT_LLM_PROVIDER")
@@ -63,7 +64,7 @@ class Settings(BaseSettings):
 
     CUVERA_CORE_SERVICE: str =Field(env="CUVERA_CORE_SERVICE")
     
-    AUTH_SERVICE_URL: str = Field(env="AUTH_SERVICE_URL")
+    AUTH_SERVICE_URL: str = Field(default="http://localhost:7005", env="AUTH_SERVICE_URL")
 
     RABBITMQ_PAINPOINT_CAPTURED_QUEUE: str = Field(env="painpoint.captured.q",)
     RABBITMQ_MEETING_PROCESSING_QUEUE: str = Field(default="dev.meetings.completed.v1", env="RABBITMQ_MEETING_PROCESSING_QUEUE")
