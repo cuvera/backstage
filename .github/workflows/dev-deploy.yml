@@ -17,26 +17,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          
-      # - name: Install dependencies
-      #   run: |
-      #     python -m pip install --upgrade pip
-      #     pip install -r requirements.txt
-          
-      # - name: Build application
-      #   run: |
-      #     # Add any build steps if needed
-      #     echo "Build completed"
-        
-      # - name: Prepare artifacts
-      #   run: |
-      #     echo "Files in current directory:"
-      #     ls -la
           
       - name: Archive artifacts
         uses: actions/upload-artifact@v4
