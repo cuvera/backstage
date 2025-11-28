@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  backstage:
+    image: ci-dev.cuvera.ai/cuvera-backstage:latest
+    container_name: ${SERVICE_NAME}
+    ports:
+      - "7015:7015"
+    env_file:
+      - .env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7015/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    networks:
+      - cuvera-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  cuvera-network:
+    driver: bridge
