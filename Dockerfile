@@ -1,13 +1,13 @@
 # Multi-stage build for Python FastAPI app
-FROM python:3.11-slim as builder
+FROM python:3.11-alpine as builder
 
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+# Install build dependencies
+RUN apk add --no-cache --virtual .build-deps \
+    gcc \
+    musl-dev \
+    linux-headers
 
 # Copy requirements first for better caching
 COPY requirements.txt ./
@@ -16,17 +16,15 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir --user -r requirements.txt
 
 # Production stage
-FROM python:3.11-slim as production
+FROM python:3.11-alpine as production
+
+# Install runtime dependencies
+RUN apk add --no-cache curl
 
 # Create non-root user
-RUN groupadd -r appuser && useradd -r -g appuser appuser
+RUN addgroup -S appuser && adduser -S appuser -G appuser
 
 WORKDIR /app
-
-# Install system dependencies for runtime
-RUN apt-get update && apt-get install -y \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
 
 # Copy installed packages from builder
 COPY --from=builder /root/.local /home/appuser/.local
