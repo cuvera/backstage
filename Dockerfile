@@ -33,7 +33,6 @@ COPY --from=builder /root/.local /home/appuser/.local
 
 # Copy application code
 COPY app ./app
-COPY .env ./
 
 # Set PATH to include user packages
 ENV PATH="/home/appuser/.local/bin:$PATH"
