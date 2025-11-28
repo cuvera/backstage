@@ -13,7 +13,7 @@ RUN apk add --no-cache --virtual .build-deps \
 COPY requirements.txt ./
 
 # Install Python dependencies
-RUN pip install --no-cache-dir --user -r requirements.txt
+RUN pip install -r requirements.txt
 
 # Production stage
 FROM python:3.11-alpine as production
