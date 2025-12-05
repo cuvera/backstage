@@ -31,7 +31,7 @@ jobs:
           context: .
           push: true
           tags: |
-            ${{ secrets.DOCKER_REGISTRY_URL }}/cuvera-backstage:latest
+            ${{ secrets.DOCKER_REGISTRY_URL }}/cuvera-backstage:${{ github.sha }}
 
   deploy:
     needs: build
@@ -73,7 +73,7 @@ jobs:
           # Create .env file with Docker Compose variables first
           cat > .env << EOF
           # Docker Compose Configuration
-          DOCKER_IMAGE=${{ secrets.DOCKER_REGISTRY_URL }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          DOCKER_IMAGE=${{ secrets.DOCKER_REGISTRY_URL }}/${{ steps.deploy_vars.outputs.SERVICE_NAME }}:${{ github.sha }}
           DOCKER_REGISTRY_URL=${{ secrets.DOCKER_REGISTRY_URL }}
           SERVICE_NAME=${{ steps.deploy_vars.outputs.SERVICE_NAME }}
           
