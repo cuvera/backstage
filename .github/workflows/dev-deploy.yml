@@ -73,6 +73,7 @@ jobs:
           # Create .env file with Docker Compose variables first
           cat > .env << EOF
           # Docker Compose Configuration
+          DOCKER_IMAGE=${{ secrets.DOCKER_REGISTRY_URL }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
           DOCKER_REGISTRY_URL=${{ secrets.DOCKER_REGISTRY_URL }}
           SERVICE_NAME=${{ steps.deploy_vars.outputs.SERVICE_NAME }}
           
@@ -123,6 +124,9 @@ jobs:
           docker-compose down
           docker-compose up -d
           
+          # Prune old images to save space
+          docker image prune -f
+
           # Show status
           docker-compose ps
           docker-compose logs --tail=20
