@@ -17,7 +17,7 @@ from app.db.mongodb import connect_to_mongo, close_mongo_connection
 from app.messaging.consumer import RabbitMQConsumerManager
 from app.messaging.producer import producer
 from app.services.jobs.daily_dept_painpoints import run_daily_department_painpoints_job
-from scripts.test_meeting_prep import quick_test
+# from scripts.test_meeting_prep import quick_test
 from app.services.meeting_analysis_orchestrator import MeetingAnalysisOrchestrator
 from app.core.openai_client import llm_client, httpx_client
 from app.messaging.producers.email_notification_producer import send_email_notification
@@ -108,7 +108,7 @@ async def http_exception_handler(_: Request, exc: HTTPException):
 import json
 @app.get("/")
 async def root():
-    print("Quick test")
+    # print("Quick test")
     # await quick_test()
     orc = MeetingAnalysisOrchestrator()
     
