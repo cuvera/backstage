@@ -17,9 +17,10 @@ from app.db.mongodb import connect_to_mongo, close_mongo_connection
 from app.messaging.consumer import RabbitMQConsumerManager
 from app.messaging.producer import producer
 from app.services.jobs.daily_dept_painpoints import run_daily_department_painpoints_job
-from scripts.test_meeting_prep import quick_test
+# from scripts.test_meeting_prep import quick_test
 from app.services.meeting_analysis_orchestrator import MeetingAnalysisOrchestrator
 from app.core.openai_client import llm_client, httpx_client
+from app.messaging.producers.email_notification_producer import send_email_notification
 
 consumer_manager = RabbitMQConsumerManager()
 scheduler: AsyncIOScheduler | None = None
@@ -107,7 +108,7 @@ async def http_exception_handler(_: Request, exc: HTTPException):
 import json
 @app.get("/")
 async def root():
-    print("Quick test")
+    # print("Quick test")
     # await quick_test()
     orc = MeetingAnalysisOrchestrator()
     
@@ -137,6 +138,20 @@ async def root():
     payload_dict = json.loads(json.dumps(payload))
 
     await orc.analyze_meeting(payload_dict)
+
+    # send_email_notification(
+    #     attendees=[{"name": "Ashwini", "email": "ashwini@rootent.com"}],
+    #     organizer={"name": "Participant", "email": "gulshan@rootent.com"},
+    #     title="Test Meeting",
+    #     startTime="2025-12-05T10:00:00Z",
+    #     endTime="2025-12-05T11:00:00Z",
+    #     duration="1 Hour 13 Minutes",
+    #     summary="Test meeting analysis",
+    #     redirectUrl="https://demo.cuvera.ai/meeting/online/692abe3447856a0242fca4a9",
+    #     noOfKeyPoints=3,
+    #     noOfActionItems=2,
+    #     tenant_id="689ddc0411e4209395942bee"
+    # )
 
     # payload = {
     #     "_id": "68c7b828f3f92a7f537b536d",

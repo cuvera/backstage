@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  backstage:
+    image: ${DOCKER_IMAGE}
+    container_name: ${SERVICE_NAME}
+    ports:
+      - "7015:7015"
+    env_file:
+      - .env
+    restart: unless-stopped
+    networks:
+      - cuvera-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  cuvera-network:
+    external: true
