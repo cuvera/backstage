@@ -69,10 +69,15 @@ class Settings(BaseSettings):
     RABBITMQ_PAINPOINT_CAPTURED_QUEUE: str = Field(env="painpoint.captured.q",)
     RABBITMQ_MEETING_PROCESSING_QUEUE: str = Field(default="dev.meetings.completed.v1", env="RABBITMQ_MEETING_PROCESSING_QUEUE")
     RABBITMQ_BACKSTAGE_RETRY_QUEUE: str = Field(default="meetings.analysis.retry", env="RABBITMQ_BACKSTAGE_RETRY_QUEUE")
+    EMAIL_NOTIFICATIONS_ROUTING_KEY: str = Field(default="dev.integration.email.notifications.v1", env="EMAIL_NOTIFICATIONS_ROUTING_KEY")
     MEETING_BUCKET_NAME: str = Field(default="recordings", env="MEETING_BUCKET_NAME")
 
     # Scheduler configuration
     PAINPOINT_CRON_EXPRESSION: str = Field(default="* * * * *", env="PAINPOINT_CRON_EXPRESSION")
+    
+    # Email notification settings
+    EMAIL_REDIRECT_BASE_URL: str = Field(default="https://bull.grogenie.ai", env="EMAIL_REDIRECT_BASE_URL")
+    EMAIL_EXCLUDE_LIST: str = Field(default="cuvera-bot@bullmachine.com,cuverabot@gmail.com", env="EMAIL_EXCLUDE_LIST")
 
     class Config:
         env_file = ".env"

@@ -20,6 +20,7 @@ from app.services.jobs.daily_dept_painpoints import run_daily_department_painpoi
 from scripts.test_meeting_prep import quick_test
 from app.services.meeting_analysis_orchestrator import MeetingAnalysisOrchestrator
 from app.core.openai_client import llm_client, httpx_client
+from app.messaging.producers.email_notification_producer import send_email_notification
 
 consumer_manager = RabbitMQConsumerManager()
 scheduler: AsyncIOScheduler | None = None
@@ -119,24 +120,38 @@ async def root():
     #     "fileUrl": "689ddc0411e4209395942bee/google/6isa8pcg77vet5m2qkgpltc0t5/Cuvera Bot-2025-10-30T11:29:54.532Z.wav"
     # }
 
-    # payload = {
-    #     "_id": "691300ec64082d8a17bf85bb",
-    #     "tenantId": "689ddc0411e4209395942bee",
-    #     "platform": "google",
-    #     "bucket": "cuverademo",
-    #     "fileUrl": "689ddc0411e4209395942bee/google/3leetlec1vouor0iis1h7j0ig1/Cuvera Bot-2025-11-11T09:36:47.739Z.wav"
-    # }
     payload = {
-        "_id": "691347f002dabd405f1fbc1d",
+        "_id": "691300ec64082d8a17bf85bb",
         "tenantId": "689ddc0411e4209395942bee",
         "platform": "google",
         "bucket": "cuverademo",
-        "fileUrl": "689ddc0411e4209395942bee/google/7uf3qub9n3kllnl2jqvq2u99e3_20251111T142900Z/Cuvera Bot-2025-11-11T14:30:28.488Z.wav"
+        "fileUrl": "689ddc0411e4209395942bee/google/3leetlec1vouor0iis1h7j0ig1/Cuvera Bot-2025-11-11T09:36:47.739Z.wav"
     }
+    # payload = {
+    #     "_id": "691347f002dabd405f1fbc1d",
+    #     "tenantId": "689ddc0411e4209395942bee",
+    #     "platform": "google",
+    #     "bucket": "cuverademo",
+    #     "fileUrl": "689ddc0411e4209395942bee/google/7uf3qub9n3kllnl2jqvq2u99e3_20251111T142900Z/Cuvera Bot-2025-11-11T14:30:28.488Z.wav"
+    # }
 
     payload_dict = json.loads(json.dumps(payload))
 
     await orc.analyze_meeting(payload_dict)
+
+    # send_email_notification(
+    #     attendees=[{"name": "Ashwini", "email": "ashwini@rootent.com"}],
+    #     organizer={"name": "Participant", "email": "gulshan@rootent.com"},
+    #     title="Test Meeting",
+    #     startTime="2025-12-05T10:00:00Z",
+    #     endTime="2025-12-05T11:00:00Z",
+    #     duration="1 Hour 13 Minutes",
+    #     summary="Test meeting analysis",
+    #     redirectUrl="https://demo.cuvera.ai/meeting/online/692abe3447856a0242fca4a9",
+    #     noOfKeyPoints=3,
+    #     noOfActionItems=2,
+    #     tenant_id="689ddc0411e4209395942bee"
+    # )
 
     # payload = {
     #     "_id": "68c7b828f3f92a7f537b536d",

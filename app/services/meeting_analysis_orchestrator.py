@@ -16,6 +16,8 @@ from app.core.config import settings
 from app.services.agents import TranscriptionAgent, CallAnalysisAgent
 from app.services.meeting_prep_curator_service import MeetingPrepCuratorService
 from app.messaging.producers.meeting_status_producer import send_meeting_status
+from app.messaging.producers.email_notification_producer import send_email_notification
+from app.utils.auth_service_client import AuthServiceClient
 
 logger = logging.getLogger(__name__)
 
@@ -212,6 +214,15 @@ class MeetingAnalysisOrchestrator:
             # Update meeting status to completed on success
             await self._update_meeting_status(meeting_id, platform, 'completed', tenant_id)
             
+            # Step 4: Send email notification
+            await self._send_meeting_completion_email(
+                meeting_id=meeting_id,
+                tenant_id=tenant_id,
+                analysis=analysis,
+                meeting_metadata=meeting_metadata,
+                transcription=transcription
+            )
+            
             total_duration_ms = round((time.time() - overall_start_time) * 1000, 2)
             logger.info(f"Meeting analysis completed successfully in {total_duration_ms}ms - meeting_id={meeting_id}, tenant_id={tenant_id}")
             return True
@@ -296,3 +307,101 @@ class MeetingAnalysisOrchestrator:
             'local_merged_file_path': file_url,
             'temp_directory': temp_dir
         }
+
+    async def _send_meeting_completion_email(
+        self,
+        meeting_id: str,
+        tenant_id: str,
+        analysis: MeetingAnalysis,
+        meeting_metadata: Dict[str, Any],
+        transcription: Dict[str, Any]
+    ) -> None:
+        """
+        Send email notification to meeting participants after analysis completion.
+        
+        Args:
+            meeting_id: Meeting identifier
+            tenant_id: Tenant identifier
+            analysis: Meeting analysis results
+            meeting_metadata: Meeting metadata from repository
+            transcription: Meeting transcription data
+        """
+        try:
+            # Collect all email addresses from meeting metadata and transcript participants
+            all_emails = set()
+            
+            # Add emails from meeting metadata
+            if meeting_metadata.get('attendees'):
+                all_emails.update(meeting_metadata.get('attendees', []))
+            
+            # Add organizer email
+            if meeting_metadata.get('organizer'):
+                all_emails.add(meeting_metadata.get('organizer'))
+                        
+            # Parse exclude list from config and remove excluded emails
+            exclude_emails = set()
+            if settings.EMAIL_EXCLUDE_LIST:
+                exclude_emails = {email.strip() for email in settings.EMAIL_EXCLUDE_LIST.split(',') if email.strip()}
+                all_emails = all_emails - exclude_emails
+                logger.info(f"Excluded {len(exclude_emails)} emails from notification: {exclude_emails}")
+            
+            # Fetch user details from auth service with fallback
+            user_mapping = []
+            try:
+                auth_client = AuthServiceClient()
+                user_details = await auth_client.fetch_users_by_emails(list(all_emails))
+                user_mapping = auth_client.create_user_email_mapping(user_details)
+                logger.info(f"Successfully fetched user details for {len(user_mapping)} users")
+            except Exception as e:
+                logger.warning(f"Auth service call failed, using fallback names - meeting_id={meeting_id}: {str(e)}")
+                user_mapping = []
+            
+            # Transform to attendees list with proper fallback
+            attendees_list = []
+            organizer_email = meeting_metadata.get('organizer', list(all_emails)[0] if all_emails else 'info@cuvera.ai')
+            organizer = None
+            
+            for email in all_emails:
+                # Find user details from auth service response
+                user_data = next((user for user in user_mapping if user['email'] == email), None)
+                
+                attendee = {
+                    "name": user_data['name'] if user_data and user_data.get('name') else "Participant",
+                    "email": email
+                }
+                attendees_list.append(attendee)
+                
+                # Set organizer if this is the organizer email
+                if email == organizer_email:
+                    organizer = attendee.copy()
+            
+            # Fallback organizer if not found
+            if not organizer and attendees_list:
+                organizer = attendees_list[0]
+            
+            # Calculate duration string
+            duration_sec = int(analysis.duration_sec)/1000 or 0
+            hours = int(duration_sec // 3600)
+            minutes = int((duration_sec % 3600) // 60)
+            duration_str = f"{hours} Hour {minutes} Minutes" if hours > 0 else f"{minutes} Minutes"
+            
+            # Send email notification
+            send_email_notification(
+                attendees=attendees_list,
+                organizer=organizer,
+                title=meeting_metadata.get('summary', 'Meeting Analysis Complete'),
+                startTime=meeting_metadata.get('start_time').isoformat() if meeting_metadata.get('start_time') else '',
+                endTime=meeting_metadata.get('end_time').isoformat() if meeting_metadata.get('end_time') else '',
+                duration=duration_str,
+                summary=analysis.summary,
+                redirectUrl=f"{settings.EMAIL_REDIRECT_BASE_URL}/meeting/online/{meeting_id}",
+                noOfKeyPoints=len(analysis.key_points),
+                noOfActionItems=len(analysis.action_items),
+                tenant_id=tenant_id
+            )
+            
+            logger.info(f"Email notification sent to {len(attendees_list)} attendees - meeting_id={meeting_id}")
+            
+        except Exception as e:
+            logger.error(f"Failed to send email notification - meeting_id={meeting_id}: {str(e)}")
+            # Don't fail the entire process if email fails
