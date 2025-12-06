@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     AZURE_OPENAI_DEPLOYMENT_NAME: Optional[str] = Field(default=None, env="AZURE_OPENAI_DEPLOYMENT_NAME")
     
     GEMINI_API_KEY: Optional[str] = Field(default=None, env="GEMINI_API_KEY")
+    
+    TRANSCRIPTION_PROVIDER: str = Field(default="gemini", env="TRANSCRIPTION_PROVIDER")
 
     HUGGINGFACE_TOKEN: str = Field(default="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", env="HUGGINGFACE_TOKEN")
     # For faster-whisper (e.g., "tiny", "base", "small", "medium", "large-v3")
@@ -48,7 +50,7 @@ class Settings(BaseSettings):
     AWS_ENDPOINT: Optional[str] = Field(default=None, env="AWS_ENDPOINT")
     
     RABBITMQ_URL: str = Field(env="RABBITMQ_URL")
-    RABBITMQ_HEARTBEAT: int = Field(default=60, env="RABBITMQ_HEARTBEAT")
+    RABBITMQ_HEARTBEAT: int = Field(default=1800, env="RABBITMQ_HEARTBEAT")
     RABBITMQ_CONNECTION_TIMEOUT: int = Field(default=30000, env="RABBITMQ_CONNECTION_TIMEOUT")
     
     RABBITMQ_VOICEPRINT_REGISTERED_QUEUE: str = Field(env="RABBITMQ_VOICEPRINT_REGISTERED_QUEUE")
