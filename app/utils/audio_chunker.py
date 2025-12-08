@@ -1,6 +1,7 @@
 import logging
 import os
 import tempfile
+import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
@@ -149,8 +150,9 @@ class AudioChunker:
             audio_data, sample_rate = audiofile.read(input_file_path)
             
             # Convert to mono if stereo
+            # audiofile returns shape (channels, samples), so average across channels (axis=0)
             if audio_data.ndim > 1:
-                audio_data = np.mean(audio_data, axis=1)
+                audio_data = np.mean(audio_data, axis=0)
             
             total_duration_seconds = len(audio_data) / sample_rate
             logger.info(f"Audio duration: {total_duration_seconds:.2f} seconds")
@@ -169,13 +171,25 @@ class AudioChunker:
                 
                 # Extract chunk
                 chunk_audio = audio_data[start_sample:end_sample]
-                
+
                 # Generate output filename
-                chunk_filename = f"{output_prefix}_{chunk_index:03d}.wav"
+                chunk_filename = f"{output_prefix}_{chunk_index:03d}.m4a"
                 chunk_path = os.path.join(output_dir, chunk_filename)
-                
-                # Export chunk using soundfile
-                sf.write(chunk_path, chunk_audio, sample_rate)
+
+                # Export chunk - write to temp WAV first, then convert to M4A
+                temp_wav_path = os.path.join(output_dir, f"temp_{chunk_index:03d}.wav")
+                sf.write(temp_wav_path, chunk_audio, sample_rate)
+
+                # Convert WAV to M4A using ffmpeg
+                subprocess.run([
+                    'ffmpeg', '-i', temp_wav_path,
+                    '-c:a', 'aac', '-b:a', '128k',
+                    '-y',  # Overwrite output file if exists
+                    chunk_path
+                ], check=True, capture_output=True)
+
+                # Remove temporary WAV file
+                os.remove(temp_wav_path)
                 
                 # Store chunk information
                 start_time_seconds = start_sample / sample_rate
@@ -250,8 +264,9 @@ class AudioChunker:
             audio_data, sample_rate = audiofile.read(input_file_path)
             
             # Convert to mono if stereo
+            # audiofile returns shape (channels, samples), so average across channels (axis=0)
             if audio_data.ndim > 1:
-                audio_data = np.mean(audio_data, axis=1)
+                audio_data = np.mean(audio_data, axis=0)
             
             # Group segments by target duration
             grouped_segments = group_segments_by_duration(segments, self.chunk_duration_minutes)
@@ -283,13 +298,25 @@ class AudioChunker:
                 
                 # Extract chunk
                 chunk_audio = audio_data[start_sample:end_sample]
-                
+
                 # Generate output filename
-                chunk_filename = f"{output_prefix}_{chunk_index:03d}.wav"
+                chunk_filename = f"{output_prefix}_{chunk_index:03d}.m4a"
                 chunk_path = os.path.join(output_dir, chunk_filename)
-                
-                # Export chunk using soundfile
-                sf.write(chunk_path, chunk_audio, sample_rate)
+
+                # Export chunk - write to temp WAV first, then convert to M4A
+                temp_wav_path = os.path.join(output_dir, f"temp_{chunk_index:03d}.wav")
+                sf.write(temp_wav_path, chunk_audio, sample_rate)
+
+                # Convert WAV to M4A using ffmpeg
+                subprocess.run([
+                    'ffmpeg', '-i', temp_wav_path,
+                    '-c:a', 'aac', '-b:a', '128k',
+                    '-y',  # Overwrite output file if exists
+                    chunk_path
+                ], check=True, capture_output=True)
+
+                # Remove temporary WAV file
+                os.remove(temp_wav_path)
                 
                 # Store chunk information
                 chunk_info = {
