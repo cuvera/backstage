@@ -20,6 +20,7 @@ from app.schemas.meeting_analysis import (
     SentimentLabel,
     SentimentOverview,
     TalkTimeStat,
+    TimeReference,
 )
 
 logger = logging.getLogger(__name__)
@@ -87,9 +88,32 @@ class CallAnalysisAgent:
         tenant_id: str,
         session_id: str,
     ) -> MeetingTranscript:
+        """Transform input payload to MeetingTranscript.
+        
+        Handles new 'transcriptions' format with MM:SS times.
+        """
         candidate = dict(payload or {})
         candidate["tenant_id"] = tenant_id
         candidate["session_id"] = session_id
+        
+        # Transform new 'transcriptions' format to 'conversation'
+        if "transcriptions" in candidate and "conversation" not in candidate:
+            transcriptions = candidate.get("transcriptions", [])
+            conversation = []
+            for t in transcriptions:
+                start_mmss = t.get("start", "00:00")
+                end_mmss = t.get("end", "00:00")
+                # Convert MM:SS to HH:MM:SS
+                start_hhmmss = self._mmss_to_hhmmss(start_mmss)
+                end_hhmmss = self._mmss_to_hhmmss(end_mmss)
+                conversation.append({
+                    "start_time": start_hhmmss,
+                    "end_time": end_hhmmss,
+                    "speaker": t.get("speaker", "Unknown"),
+                    "text": t.get("transcription", ""),
+                })
+            candidate["conversation"] = conversation
+        
         if not candidate.get("conversation"):
             raise CallAnalysisAgentError("conversation must contain at least one turn.")
 
@@ -98,13 +122,68 @@ class CallAnalysisAgent:
         except ValidationError as exc:
             logger.exception("[CallAnalysisAgent] Transcript validation failed: %s", exc)
             raise CallAnalysisAgentError(f"transcript validation failed: {exc}") from exc
+    
+    def _mmss_to_hhmmss(self, mmss: str) -> str:
+        """Convert MM:SS format to HH:MM:SS format.
+        
+        Handles cases like '65:32' → '01:05:32'
+        """
+        try:
+            parts = mmss.strip().split(":")
+            if len(parts) == 2:
+                minutes = int(parts[0])
+                seconds = int(parts[1])
+                hours = minutes // 60
+                remaining_minutes = minutes % 60
+                return f"{hours:02d}:{remaining_minutes:02d}:{seconds:02d}"
+            elif len(parts) == 3:
+                # Already in HH:MM:SS format
+                return mmss
+            else:
+                return "00:00:00"
+        except (ValueError, IndexError):
+            return "00:00:00"
+    
+    def _hhmmss_to_seconds(self, hhmmss: str) -> float:
+        """Convert HH:MM:SS format to seconds."""
+        try:
+            parts = hhmmss.strip().split(":")
+            if len(parts) == 3:
+                hours = int(parts[0])
+                minutes = int(parts[1])
+                seconds = int(parts[2])
+                return hours * 3600 + minutes * 60 + seconds
+            elif len(parts) == 2:
+                minutes = int(parts[0])
+                seconds = int(parts[1])
+                return minutes * 60 + seconds
+            else:
+                return 0.0
+        except (ValueError, IndexError):
+            return 0.0
+    
+    def _seconds_to_hhmmss(self, seconds: float) -> str:
+        """Convert seconds to HH:MM:SS format."""
+        s = int(seconds)
+        hours = s // 3600
+        minutes = (s % 3600) // 60
+        sec = s % 60
+        return f"{hours:02d}:{minutes:02d}:{sec:02d}"
 
     def _compute_talk_time(self, transcript: MeetingTranscript) -> List[TalkTimeStat]:
+        """Compute talk time statistics for each speaker.
+        
+        Converts HH:MM:SS times to seconds for calculation, then formats output as HH:MM:SS.
+        """
         totals: Dict[str, float] = defaultdict(float)
         turns: Dict[str, int] = defaultdict(int)
 
         for turn in transcript.conversation:
-            totals[turn.speaker] += turn.duration
+            # Parse start and end times to calculate duration
+            start_seconds = self._hhmmss_to_seconds(turn.start_time)
+            end_seconds = self._hhmmss_to_seconds(turn.end_time)
+            duration = max(0.0, end_seconds - start_seconds)
+            totals[turn.speaker] += duration
             turns[turn.speaker] += 1
 
         total_duration = sum(totals.values()) or 1.0
@@ -114,7 +193,7 @@ class CallAnalysisAgent:
             stats.append(
                 TalkTimeStat(
                     speaker=speaker,
-                    total_seconds=round(seconds, 2),
+                    total_duration=self._seconds_to_hhmmss(seconds),
                     share_percent=share,
                     turns=turns[speaker],
                 )
@@ -157,7 +236,7 @@ class CallAnalysisAgent:
     def _build_prompt(self, transcript: MeetingTranscript, stats: List[TalkTimeStat]) -> str:
         participants = ", ".join(p.name for p in transcript.participants) or "Unknown participants"
         talk_time_lines = "\n".join(
-            f"{s.speaker}: {s.total_seconds}s ({s.share_percent}%), turns={s.turns}"
+            f"{s.speaker}: {s.total_duration} ({s.share_percent}%), turns={s.turns}"
             for s in stats
         )
 
@@ -167,11 +246,11 @@ class CallAnalysisAgent:
             "{\n"
             '  "summary": string,\n'
             '  "key_points": [string],\n'
-            '  "decisions": [{"title": string, "owner": string|null, "due_date": string|null, "references": [int]}],\n'
-            '  "action_items": [{"task": string, "owner": string|null, "due_date": string|null, "priority": string|null, "references": [int]}],\n'
+            '  "decisions": [{"title": string, "owner": string|null, "due_date": string|null, "references": [{"start": "HH:MM:SS", "end": "HH:MM:SS"}]}],\n'
+            '  "action_items": [{"task": string, "owner": string|null, "due_date": string|null, "priority": string|null, "references": [{"start": "HH:MM:SS", "end": "HH:MM:SS"}]}],\n'
             '  "call_scoring": {\n'
             '    "score": number (0-10),\n'
-            '    "grade": string (A, B, C, D, F),\n' # Updated grade list in prompt
+            '    "grade": string (A, B, C, D, F),\n'
             '    "reasons": [{"reason": string, "reference": {"start": "HH:MM:SS", "end": "HH:MM:SS"}}],\n'
             '    "summary": string\n'
             '  }\n'
@@ -182,7 +261,7 @@ class CallAnalysisAgent:
             "2. **ACTION ITEM:** A specific **task**, **to-do**, or **deliverable** assigned for FUTURE execution. Any task or actionable follow-up that mentions an owner name or a time/due-date must be captured as an action item.\n"
             "3. **Summary:** A comprehensive, high-level overview (5-8 crisp sentences) covering the main **purpose/goals**, the final **outcomes**, and any major **follow-up** steps.\n"
             "4. **Key Points:** Specific, factual, bullet-style highlights (strings) of significant **progress**, **blockers**, **metrics**, or **updates** discussed.\n"
-            "5. Decisions/action_items must include references (0-based turn indices); otherwise use an empty list. All references must be integers.\n"
+            "5. **REFERENCES:** All decisions and action_items MUST include time-based references in HH:MM:SS format (e.g., {\"start\": \"00:05:32\", \"end\": \"00:06:15\"}). Use timestamps from the transcript directly.\n"
             "6. Use null (not empty string) for unknown owner/due_date/priority fields.\n"
             "7. Use [] for empty arrays; never use null or omit required keys.\n"
             "8. Output MUST be valid JSON — no code fences, trailing commas, extra keys, or explanatory text.\n\n"
@@ -297,6 +376,16 @@ class CallAnalysisAgent:
         
         call_scoring = self._build_call_scoring(payload.get("call_scoring"))
         
+        # Calculate duration from transcript conversation
+        duration_hhmmss = "00:00:00"
+        if transcript.conversation:
+            first_turn = transcript.conversation[0]
+            last_turn = transcript.conversation[-1]
+            start_sec = self._hhmmss_to_seconds(first_turn.start_time)
+            end_sec = self._hhmmss_to_seconds(last_turn.end_time)
+            duration_sec = max(0.0, end_sec - start_sec)
+            duration_hhmmss = self._seconds_to_hhmmss(duration_sec)
+        
         analysis = MeetingAnalysis(
             tenant_id=transcript.tenant_id,
             session_id=transcript.session_id,
@@ -309,7 +398,7 @@ class CallAnalysisAgent:
             call_scoring=call_scoring,
             created_at=datetime.utcnow().isoformat(),
             transcript_language=transcript.language,
-            duration_sec=transcript.duration_sec,
+            duration=duration_hhmmss,
             metadata=self._build_metadata(payload.get("metadata"), context),
         )
         return analysis
@@ -353,6 +442,7 @@ class CallAnalysisAgent:
         return out
 
     def _build_decisions(self, value: Any) -> List[Decision]:
+        """Build decisions list from LLM response with TimeReference objects."""
         decisions: List[Decision] = []
         if not isinstance(value, Iterable):
             return decisions
@@ -366,12 +456,13 @@ class CallAnalysisAgent:
                 title=title,
                 owner=self._clean_optional(entry.get("owner")),
                 due_date=self._clean_optional(entry.get("due_date")),
-                references=self._ensure_int_list(entry.get("references")),
+                references=self._build_time_references(entry.get("references")),
             )
             decisions.append(decision)
         return decisions
 
     def _build_action_items(self, value: Any) -> List[ActionItem]:
+        """Build action items list from LLM response with TimeReference objects."""
         items: List[ActionItem] = []
         if not isinstance(value, Iterable):
             return items
@@ -386,10 +477,23 @@ class CallAnalysisAgent:
                 owner=self._clean_optional(entry.get("owner")),
                 due_date=self._clean_optional(entry.get("due_date")),
                 priority=self._clean_optional(entry.get("priority")),
-                references=self._ensure_int_list(entry.get("references")),
+                references=self._build_time_references(entry.get("references")),
             )
             items.append(item)
         return items
+    
+    def _build_time_references(self, value: Any) -> List[TimeReference]:
+        """Build list of TimeReference objects from LLM response."""
+        refs: List[TimeReference] = []
+        if not isinstance(value, Iterable):
+            return refs
+        for entry in value:
+            if not isinstance(entry, dict):
+                continue
+            start = (entry.get("start") or "00:00:00").strip()
+            end = (entry.get("end") or "00:00:00").strip()
+            refs.append(TimeReference(start=start, end=end))
+        return refs
 
     def _clean_optional(self, value: Any) -> Optional[str]:
         if value is None:
@@ -486,10 +590,7 @@ class CallAnalysisAgent:
             logger.warning("[CallAnalysisAgent] Failed to build CallScoring: %s", e)
             return None
 
-    def _format_timestamp(self, seconds: int) -> str:
-        """Formats seconds into HH:MM:SS string."""
-        s = int(seconds)
-        hours = s // 3600
-        minutes = (s % 3600) // 60
-        sec = s % 60
-        return f"{hours:02d}:{minutes:02d}:{sec:02d}"
+    def _format_timestamp(self, time_str: str) -> str:
+        """Format timestamp - returns as-is if already in HH:MM:SS format."""
+        # Time is already in HH:MM:SS format from input transformation
+        return time_str

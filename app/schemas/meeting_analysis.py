@@ -59,31 +59,18 @@ class PreviousMeetingReference(BaseModel):
 
 
 class Turn(BaseModel):
-    start_time: float = Field(..., ge=0.0)
-    end_time: float = Field(..., gt=0.0)
+    """Represents a single turn/segment in a conversation.
+    
+    Time fields use HH:MM:SS string format.
+    """
+    start_time: str = Field(..., description="Start time in HH:MM:SS format")
+    end_time: str = Field(..., description="End time in HH:MM:SS format")
     speaker: str = Field(..., min_length=1)
     text: str = Field(..., min_length=1)
-    duration: Optional[float] = Field(
+    duration: Optional[str] = Field(
         None,
-        gt=0.0,
-        description="Duration in seconds. Auto-derived when omitted.",
+        description="Duration in HH:MM:SS format. Auto-derived when omitted.",
     )
-
-    # @validator("end_time")
-    # def _end_after_start(cls, v, values):
-    #     start = values.get("start_time", 0.0)
-    #     if v <= start:
-    #         raise ValueError("end_time must be greater than start_time")
-    #     return v
-
-    @validator("duration", always=True)
-    def _ensure_duration(cls, v, values):
-        start = float(values.get("start_time", 0.0))
-        end = float(values.get("end_time", 0.0))
-        duration = float(v) if v is not None else max(0.0, end - start)
-        if duration < 0.0:
-            raise ValueError("duration must be positive")
-        return round(duration, 2)
 
 
 class Participant(BaseModel):
@@ -100,24 +87,9 @@ class MeetingTranscript(BaseModel):
     conversation: List[Turn] = Field(default_factory=list)
     started_at_sec: Optional[float] = Field(None, ge=0.0)
     ended_at_sec: Optional[float] = Field(None, ge=0.0)
-    duration_sec: Optional[float] = Field(None, ge=0.0)
+    duration_sec: Optional[float] = Field(None, ge=0.0, description="Duration in seconds (deprecated, use agent-calculated duration)")
     language: Optional[str] = Field(None, description="BCP-47 code, e.g. 'en-US'.")
     metadata: Dict[str, Any] = Field(default_factory=dict)
-
-    @validator("conversation")
-    def _ensure_sorted(cls, turns: List[Turn]):
-        return sorted(turns, key=lambda t: (t.start_time, t.end_time))
-
-    @validator("duration_sec", always=True)
-    def _derive_duration(cls, value, values):
-        if value is not None:
-            return value
-        conversation: List[Turn] = values.get("conversation", [])
-        if not conversation:
-            return 0.0
-        start = conversation[0].start_time
-        end = conversation[-1].end_time
-        return round(max(0.0, end - start), 2)
 
 
 class SentimentOverview(BaseModel):
@@ -126,10 +98,17 @@ class SentimentOverview(BaseModel):
 
 
 class TalkTimeStat(BaseModel):
+    """Talk time statistics for a speaker."""
     speaker: str
-    total_seconds: float = Field(..., ge=0.0)
+    total_duration: str = Field(..., description="Total speaking duration in HH:MM:SS format")
     share_percent: float = Field(..., ge=0.0, le=100.0)
     turns: int = Field(..., ge=0)
+
+
+class TimeReference(BaseModel):
+    """Time reference with start and end timestamps."""
+    start: str = Field(..., description="Start time in HH:MM:SS format")
+    end: str = Field(..., description="End time in HH:MM:SS format")
 
 
 class Decision(BaseModel):
@@ -138,7 +117,10 @@ class Decision(BaseModel):
     due_date: Optional[str] = Field(
         None, description="ISO date if known (YYYY-MM-DD)."
     )
-    references: List[int] = Field(default_factory=list)
+    references: List[TimeReference] = Field(
+        default_factory=list,
+        description="List of time references where this decision was discussed"
+    )
 
 
 class ActionItem(BaseModel):
@@ -146,14 +128,20 @@ class ActionItem(BaseModel):
     owner: Optional[str] = None
     due_date: Optional[str] = None
     priority: Optional[str] = None
-    references: List[int] = Field(default_factory=list)
+    references: List[TimeReference] = Field(
+        default_factory=list,
+        description="List of time references where this action item was discussed"
+    )
 
 
 class RiskIssue(BaseModel):
     description: str = Field(..., min_length=1)
     mitigation: Optional[str] = None
     severity: Optional[str] = None
-    references: List[int] = Field(default_factory=list)
+    references: List[TimeReference] = Field(
+        default_factory=list,
+        description="List of time references where this risk was discussed"
+    )
 
 
 class Deviation(BaseModel):
@@ -204,7 +192,7 @@ class MeetingAnalysis(BaseModel):
         None, description="ISO timestamp when analysis was created."
     )
     transcript_language: Optional[str] = None
-    duration_sec: Optional[float] = None
+    duration: Optional[str] = Field(None, description="Meeting duration in HH:MM:SS format")
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
