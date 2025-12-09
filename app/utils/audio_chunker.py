@@ -200,7 +200,8 @@ class AudioChunker:
                     "end_time": seconds_to_timestamp(end_time_seconds),
                     "duration_seconds": end_time_seconds - start_time_seconds,
                     "file_path": chunk_path,
-                    "file_size_bytes": os.path.getsize(chunk_path)
+                    "file_size_bytes": os.path.getsize(chunk_path),
+                    "segments": []
                 }
                 chunks.append(chunk_info)
                 
@@ -326,9 +327,7 @@ class AudioChunker:
                     "duration_seconds": group_end_seconds - group_start_seconds,
                     "file_path": chunk_path,
                     "file_size_bytes": os.path.getsize(chunk_path),
-                    "segments_included": [seg['segment_id'] for seg in segment_group],
-                    "segment_count": len(segment_group),
-                    "segments_detail": segment_group
+                    "segments": segment_group
                 }
                 chunks.append(chunk_info)
                 

@@ -1,4 +1,4 @@
-TRANSCRIPTION_AND_SENTIMENT_ANALYSIS_PROMPT = ""
+TRANSCRIPTION_AND_SENTIMENT_ANALYSIS_PROMPT=""""""
 
 TRANSCRIPTION_AND_SENTIMENT_ANALYSIS_PROMPT_ONLINE = """Transcribe the following audio file and provide accurate, verbatim transcription for each segment. The audio starts from {{start}} and ends at {{end}}.
 
@@ -48,7 +48,8 @@ Please provide the transcription in JSON format with this structure:
        "sentiment": <positive, negative, neutral, or mixed>
     }
   ]
-}"""
+}
+"""
 
 
 MEETING_PREP_SUGGESTION_PROMPT = """You are an expert meeting operations assistant. Produce an Executive Prep Pack (one-pager) for an upcoming online, recurring meeting. Always ground the pack in at least one previous meeting plus the diarized transcript + sentiment context described in TRANSCRIPTION_AND_SENTIMENT_ANALYSIS_PROMPT.
