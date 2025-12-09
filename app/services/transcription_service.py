@@ -63,10 +63,13 @@ class TranscriptionService:
                 "segment_id": idx,
                 "start": self._ms_to_hhmmss(seg["start"]),
                 "end": self._ms_to_hhmmss(seg["end"]),
-                "label": seg["speakerName"]
+                "label": seg["speaker_name"]
             })
         
         logger.info(f"[TranscriptionService] Generated {len(segments)} segments from speaker timeframes")
+        if segments:
+            logger.info(f"[TranscriptionService] First segment: {segments[0]}")
+            logger.info(f"[TranscriptionService] Last segment: {segments[-1]}")
         return {"segments": segments}
     
     async def _chunk_audio(
@@ -218,20 +221,105 @@ class TranscriptionService:
         logger.info(f"[TranscriptionService] Completed parallel transcription of {len(results)} chunks")
         return results
     
-    def _merge_transcription_results(self, transcription_results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def _time_to_seconds(self, time_str: str) -> float:
+        """Convert MM:SS to seconds (Gemini format)"""
+        parts = time_str.split(':')
+        if len(parts) == 2:
+            # MM:SS format from Gemini
+            minutes = int(parts[0])
+            seconds = int(parts[1])
+            return minutes * 60 + seconds
+        elif len(parts) == 3:
+            # HH:MM:SS format (fallback)
+            return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
+        else:
+            return 0.0
+
+    def _seconds_to_time(self, seconds: float) -> str:
+        """Convert seconds to MM:SS format (Gemini format)"""
+        m = int(seconds // 60)
+        s = int(seconds % 60)
+        return f"{m:02d}:{s:02d}"
+
+    def _map_speakers_to_segments(self, segments, meeting_metadata):
+        """Map speaker names to transcription segments based on timeframes"""
+        speaker_timeframes = meeting_metadata.get("speaker_timeframes", [])
+        
+        for segment in segments:
+            segment_start = self._time_to_seconds(segment["start"])
+            segment_end = self._time_to_seconds(segment["end"])
+            
+            for speaker_frame in speaker_timeframes:
+                speaker_start = speaker_frame["start"] / 1000  # Convert ms to seconds
+                speaker_end = speaker_frame["end"] / 1000
+                
+                if (segment_start >= speaker_start and segment_start < speaker_end) or \
+                   (segment_end > speaker_start and segment_end <= speaker_end):
+                    segment["speaker"] = speaker_frame["speaker_name"]
+                    break
+            else:
+                segment["speaker"] = "Unknown"
+        
+        return segments
+
+    def _calculate_average_sentiment(self, sentiments):
+        """Calculate average sentiment from list of sentiment strings"""
+        if not sentiments:
+            return "neutral"
+        
+        sentiment_values = {"positive": 1, "neutral": 0, "negative": -1}
+        total_value = sum(sentiment_values.get(s.lower(), 0) for s in sentiments)
+        average = total_value / len(sentiments)
+        
+        if average > 0.33:
+            return "positive"
+        elif average < -0.33:
+            return "negative"
+        else:
+            return "neutral"
+
+    def _extract_speaker_summary(self, segments):
+        """Extract speaker summary as array of objects"""
+        speaker_stats = {}
+        
+        for segment in segments:
+            speaker = segment.get("speaker", "Unknown")
+            sentiment = segment.get("sentiment", "neutral")
+            
+            if speaker not in speaker_stats:
+                speaker_stats[speaker] = {"segments": 0, "total_duration_seconds": 0, "sentiments": []}
+            
+            speaker_stats[speaker]["segments"] += 1
+            start_seconds = self._time_to_seconds(segment["start"])
+            end_seconds = self._time_to_seconds(segment["end"])
+            speaker_stats[speaker]["total_duration_seconds"] += (end_seconds - start_seconds)
+            speaker_stats[speaker]["sentiments"].append(sentiment)
+        
+        speakers_array = []
+        for speaker_name, stats in speaker_stats.items():
+            speakers_array.append({
+                "speaker": speaker_name,
+                "segments": stats["segments"],
+                "duration": self._seconds_to_time(stats["total_duration_seconds"]),
+                "sentiment": self._calculate_average_sentiment(stats["sentiments"])
+            })
+        
+        return speakers_array
+
+    def _merge_transcription_results(self, transcription_results: List[Dict[str, Any]], meeting_metadata: Dict = None) -> Dict[str, Any]:
         """
-        Merge all chunk transcription results into a single transcription
+        Merge all chunk transcription results into a single transcription with absolute timeline and speaker mapping
         
         Args:
             transcription_results: List of transcription results from chunks
+            meeting_metadata: Meeting metadata containing speaker_timeframes
             
         Returns:
-            Merged transcription result
+            Merged transcription result with absolute timeline, speaker mapping, and speaker summary
         """
         logger.info(f"[TranscriptionService] Merging {len(transcription_results)} transcription results")
         
-        merged_transcriptions = []
-        total_segments = 0
+        all_segments = []
         successful_chunks = 0
         failed_chunks = 0
         
@@ -242,36 +330,54 @@ class TranscriptionService:
                 failed_chunks += 1
                 logger.warning(f"[TranscriptionService] Skipping failed chunk {chunk_info.get('chunk_id')}")
                 continue
+                
+            chunk_start_seconds = self._time_to_seconds(chunk_info.get("start_time", "00:00"))
             
             transcriptions = result.get("transcriptions", [])
-            if transcriptions:
-                # Add chunk context to each transcription segment
-                for transcription in transcriptions:
-                    transcription["source_chunk"] = chunk_info.get("chunk_id")
-                    transcription["chunk_start_time"] = chunk_info.get("start_time")
-                    transcription["chunk_end_time"] = chunk_info.get("end_time")
+            for transcription in transcriptions:
+                # Convert to absolute timeline
+                segment_start_seconds = self._time_to_seconds(transcription.get("start", "00:00"))
+                segment_end_seconds = self._time_to_seconds(transcription.get("end", "00:00"))
                 
-                merged_transcriptions.extend(transcriptions)
-                total_segments += len(transcriptions)
-                successful_chunks += 1
+                absolute_start = chunk_start_seconds + segment_start_seconds
+                absolute_end = chunk_start_seconds + segment_end_seconds
+                
+                # Update start/end with absolute values
+                transcription["start"] = self._seconds_to_time(absolute_start)
+                transcription["end"] = self._seconds_to_time(absolute_end)
+                
+                # Keep chunk context with consistent MM:SS format
+                transcription["source_chunk"] = chunk_info.get("chunk_id")
+                transcription["chunk_start_time"] = self._seconds_to_time(self._time_to_seconds(chunk_info.get("start_time", "00:00")))
+                transcription["chunk_end_time"] = self._seconds_to_time(self._time_to_seconds(chunk_info.get("end_time", "00:00")))
+                
+                all_segments.append(transcription)
+            
+            successful_chunks += 1
         
-        # Sort by segment timing if available
-        try:
-            merged_transcriptions.sort(key=lambda x: x.get("start", "00:00:00"))
-        except:
-            logger.warning("[TranscriptionService] Could not sort transcriptions by time")
+        # Sort by absolute timeline
+        all_segments.sort(key=lambda x: self._time_to_seconds(x["start"]))
+        
+        # Add speaker mapping if available
+        if meeting_metadata and meeting_metadata.get("speaker_timeframes"):
+            all_segments = self._map_speakers_to_segments(all_segments, meeting_metadata)
+        
+        # Generate speaker summary
+        speakers_summary = self._extract_speaker_summary(all_segments)
         
         merged_result = {
-            "transcriptions": merged_transcriptions,
+            "transcriptions": all_segments,
+            "speakers": speakers_summary,
             "metadata": {
-                "total_segments": total_segments,
+                "total_segments": len(all_segments),
                 "successful_chunks": successful_chunks,
                 "failed_chunks": failed_chunks,
-                "total_chunks": len(transcription_results)
+                "total_chunks": len(transcription_results),
+                "has_speaker_mapping": bool(meeting_metadata and meeting_metadata.get("speaker_timeframes"))
             }
         }
         
-        logger.info(f"[TranscriptionService] Merged transcription complete: {total_segments} segments from {successful_chunks}/{len(transcription_results)} chunks")
+        logger.info(f"[TranscriptionService] Merged transcription complete: {len(all_segments)} segments from {successful_chunks}/{len(transcription_results)} chunks")
         return merged_result
     
     async def transcribe_meeting(
@@ -320,7 +426,7 @@ class TranscriptionService:
             transcription_results = await self._transcribe_chunks_parallel(chunks, platform, models)
             
             # 3. Merge all chunk results into single transcription
-            merged_transcription = self._merge_transcription_results(transcription_results)
+            merged_transcription = self._merge_transcription_results(transcription_results, meeting_metadata)
             
             # Add processing metadata
             end_time = asyncio.get_event_loop().time()

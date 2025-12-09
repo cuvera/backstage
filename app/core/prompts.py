@@ -18,8 +18,8 @@ Please provide the transcription in JSON format with this structure:
   "transcriptions": [
     {
       "segment_id": <segment number eg. 1, 2, 3 ...>,
-      "start": <HH:mm:ss>,
-      "end": <HH:mm:ss>,
+      "start": <mm:ss>,
+      "end": <mm:ss>,
       "transcription": <transcription text>,
        "sentiment": <positive, negative, neutral, or mixed>
     }
@@ -42,8 +42,8 @@ Please provide the transcription in JSON format with this structure:
   "transcriptions": [
     {
       "segment_id": <segment number eg. 1, 2, 3 ...>,
-       "start": <HH:mm:ss>,
-       "end": <HH:mm:ss>,
+       "start": <mm:ss>,
+       "end": <mm:ss>,
       "transcription": <transcription text>,
        "sentiment": <positive, negative, neutral, or mixed>
     }
