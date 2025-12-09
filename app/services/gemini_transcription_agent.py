@@ -42,40 +42,40 @@ class GeminiTranscriptionAgent:
     def _is_retryable_error(self, error: Exception) -> bool:
         """
         Determine if an error should trigger fallback to next model.
-        
+
         Args:
             error: The exception that occurred
-            
+
         Returns:
             True if error is retryable, False otherwise
         """
         error_message = str(error).lower()
-        
+
         # Rate limiting errors
         if any(keyword in error_message for keyword in [
             "rate limit", "quota exceeded", "too many requests", "429"
         ]):
             return True
-            
+
         # Model availability errors
         if any(keyword in error_message for keyword in [
-            "model not found", "model unavailable", "service unavailable", 
+            "model not found", "model unavailable", "service unavailable",
             "internal error", "503", "502", "500"
         ]):
             return True
-            
+
         # Timeout errors
         if any(keyword in error_message for keyword in [
             "timeout", "deadline exceeded", "connection reset"
         ]):
             return True
-            
+
         # Model capacity errors
         if any(keyword in error_message for keyword in [
             "overloaded", "capacity", "resource exhausted"
         ]):
             return True
-            
+
         return False
 
     async def _upload_audio_file(self, audio_file_path: str):
@@ -122,19 +122,19 @@ class GeminiTranscriptionAgent:
             raise TranscriptionAgentError(f"File upload failed: {e}") from e
 
     async def _transcribe_with_model(
-        self, 
-        model: str, 
-        prompt: str, 
-        uploaded_file
+        self,
+        model: str,
+        prompt: str,
+        uploaded_file,
     ) -> Dict[str, Any]:
         """
         Transcribe audio using specific Gemini model.
-        
+
         Args:
             model: Gemini model name
             prompt: Custom transcription prompt
             uploaded_file: Uploaded file object
-            
+
         Returns:
             Transcription result dictionary
         """
@@ -150,7 +150,7 @@ class GeminiTranscriptionAgent:
             ],
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
-                temperature=0.0,
+                temperature=0.0
             )
         )
 
@@ -158,20 +158,20 @@ class GeminiTranscriptionAgent:
         logger.info(f"[Gemini Agent] Transcription completed with {model} in {llm_duration_ms}ms")
 
         response_content = response.text
-        
+
         if not response_content:
             raise TranscriptionAgentError(f"Model {model} returned empty response")
-        
+
         # Parse JSON response
         try:
             # Check if response was truncated
             if response.candidates[0].finish_reason == "MAX_TOKENS":
                 logger.warning(f"[Gemini Agent] Response from {model} was truncated due to token limit")
-            
+
             result = json.loads(response_content)
             logger.info(f"[Gemini Agent] Successfully parsed response from {model}")
             return result
-            
+
         except json.JSONDecodeError as e:
             logger.error(f"[Gemini Agent] Failed to parse response from {model} as JSON: {e}")
             logger.error(f"Response content length: {len(response_content)}")
@@ -215,45 +215,47 @@ class GeminiTranscriptionAgent:
             return {"transcriptions": []}
 
     async def transcribe_with_prompt(
-        self, 
-        prompt: str, 
+        self,
+        prompt: str,
         audio_file_path: str
     ) -> Dict[str, Any]:
         """
         Transcribe audio file using custom prompt with model fallback.
-        
+
         Args:
             prompt: Custom transcription prompt
             audio_file_path: Path to the audio file
-            
+
         Returns:
             Dictionary containing transcriptions array with segment data
-            
+
         Raises:
             TranscriptionAgentError: If all models fail
         """
         uploaded_file = None
         last_exception = None
-        
+
         try:
             # Upload file once, reuse for all model attempts
             uploaded_file = await self._upload_audio_file(audio_file_path)
-            
+
             # Try each model in the fallback chain
             for model_idx, model in enumerate(self.models):
                 try:
                     logger.info(f"[Gemini Agent] Attempting transcription with {model} "
                                f"({model_idx + 1}/{len(self.models)})")
-                    
-                    raw_result = await self._transcribe_with_model(model, prompt, uploaded_file)
+
+                    raw_result = await self._transcribe_with_model(
+                        model, prompt, uploaded_file,
+                    )
                     formatted_result = self._format_to_segments(raw_result)
-                    
+
                     logger.info(f"[Gemini Agent] Successfully transcribed with {model}")
                     return formatted_result
-                    
+
                 except Exception as e:
                     last_exception = e
-                    
+
                     if self._is_retryable_error(e):
                         logger.warning(f"[Gemini Agent] Model {model} failed with retryable error: {e}")
                         if model_idx < len(self.models) - 1:
@@ -262,17 +264,17 @@ class GeminiTranscriptionAgent:
                     else:
                         logger.error(f"[Gemini Agent] Model {model} failed with non-retryable error: {e}")
                         raise TranscriptionAgentError(f"Non-retryable error with {model}: {e}") from e
-            
+
             # All models failed
             logger.error(f"[Gemini Agent] All models failed. Last error: {last_exception}")
             raise TranscriptionAgentError(f"All models in fallback chain failed. Last error: {last_exception}")
-            
+
         except Exception as e:
             logger.error(f"[Gemini Agent] Transcription failed: {e}")
             if isinstance(e, TranscriptionAgentError):
                 raise
             raise TranscriptionAgentError(f"Transcription failed: {e}") from e
-            
+
         finally:
             # Clean up uploaded file
             if uploaded_file:

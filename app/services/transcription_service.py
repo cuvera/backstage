@@ -31,29 +31,28 @@ class TranscriptionService:
         self.semaphore = asyncio.Semaphore(max_concurrent)
         logger.info(f"[TranscriptionService] Initialized with max {max_concurrent} concurrent transcriptions")
     
-    def _ms_to_hhmmss(self, ms: int) -> str:
+    def _ms_to_mmss(self, ms: int) -> str:
         """
-        Convert milliseconds to HH:MM:SS format
-        
+        Convert milliseconds to MM:SS format
+
         Args:
             ms: Time in milliseconds
-            
+
         Returns:
-            Time string in HH:MM:SS format
+            Time string in MM:SS format
         """
-        s = ms // 1000
-        h = s // 3600
-        m = (s % 3600) // 60
-        sec = s % 60
-        return f"{h:02d}:{m:02d}:{sec:02d}"
+        total_seconds = ms // 1000
+        minutes = total_seconds // 60
+        seconds = total_seconds % 60
+        return f"{minutes:02d}:{seconds:02d}"
     
     def _generate_segments_from_speaker_timeframes(self, speaker_timeframes: List[Dict]) -> Dict:
         """
         Convert speaker timeframes to segments format for chunking
-        
+
         Args:
             speaker_timeframes: List of dicts with speakerName, start, end (in ms)
-            
+
         Returns:
             Dict with segments array
         """
@@ -61,11 +60,11 @@ class TranscriptionService:
         for idx, seg in enumerate(speaker_timeframes, start=1):
             segments.append({
                 "segment_id": idx,
-                "start": self._ms_to_hhmmss(seg["start"]),
-                "end": self._ms_to_hhmmss(seg["end"]),
+                "start": self._ms_to_mmss(seg["start"]),
+                "end": self._ms_to_mmss(seg["end"]),
                 "label": seg["speaker_name"]
             })
-        
+
         logger.info(f"[TranscriptionService] Generated {len(segments)} segments from speaker timeframes")
         if segments:
             logger.info(f"[TranscriptionService] First segment: {segments[0]}")
@@ -242,24 +241,43 @@ class TranscriptionService:
         return f"{m:02d}:{s:02d}"
 
     def _map_speakers_to_segments(self, segments, meeting_metadata):
-        """Map speaker names to transcription segments based on timeframes"""
+        """
+        Map speaker names to transcription segments based on timeframes.
+        Uses maximum overlap logic to handle overlapping speaker timeframes.
+        """
         speaker_timeframes = meeting_metadata.get("speaker_timeframes", [])
-        
+
+        # Convert speaker timeframes to MM:SS format once
+        speaker_timeframes_mmss = []
+        for speaker_frame in speaker_timeframes:
+            speaker_timeframes_mmss.append({
+                "speaker_name": speaker_frame["speaker_name"],
+                "start": self._ms_to_mmss(speaker_frame["start"]),
+                "end": self._ms_to_mmss(speaker_frame["end"])
+            })
+
         for segment in segments:
             segment_start = self._time_to_seconds(segment["start"])
             segment_end = self._time_to_seconds(segment["end"])
-            
-            for speaker_frame in speaker_timeframes:
-                speaker_start = speaker_frame["start"] / 1000  # Convert ms to seconds
-                speaker_end = speaker_frame["end"] / 1000
-                
-                if (segment_start >= speaker_start and segment_start < speaker_end) or \
-                   (segment_end > speaker_start and segment_end <= speaker_end):
-                    segment["speaker"] = speaker_frame["speaker_name"]
-                    break
-            else:
-                segment["speaker"] = "Unknown"
-        
+
+            best_match = None
+            max_overlap = 0
+
+            for speaker_frame in speaker_timeframes_mmss:
+                speaker_start = self._time_to_seconds(speaker_frame["start"])
+                speaker_end = self._time_to_seconds(speaker_frame["end"])
+
+                # Calculate overlap duration
+                overlap_start = max(segment_start, speaker_start)
+                overlap_end = min(segment_end, speaker_end)
+                overlap_duration = max(0, overlap_end - overlap_start)
+
+                if overlap_duration > max_overlap:
+                    max_overlap = overlap_duration
+                    best_match = speaker_frame["speaker_name"]
+
+            segment["speaker"] = best_match if best_match else "Unknown"
+
         return segments
 
     def _calculate_average_sentiment(self, sentiments):
@@ -338,25 +356,30 @@ class TranscriptionService:
                 # Convert to absolute timeline
                 segment_start_seconds = self._time_to_seconds(transcription.get("start", "00:00"))
                 segment_end_seconds = self._time_to_seconds(transcription.get("end", "00:00"))
-                
-                absolute_start = chunk_start_seconds + segment_start_seconds
-                absolute_end = chunk_start_seconds + segment_end_seconds
+
+                # With segemented (online meeting) metadata, start and end are already absolute 
+                if meeting_metadata and meeting_metadata.get("speaker_timeframes"):
+                    absolute_start =  segment_start_seconds
+                    absolute_end = segment_end_seconds
+                else:
+                    absolute_start = chunk_start_seconds + segment_start_seconds
+                    absolute_end = chunk_start_seconds + segment_end_seconds
                 
                 # Update start/end with absolute values
                 transcription["start"] = self._seconds_to_time(absolute_start)
                 transcription["end"] = self._seconds_to_time(absolute_end)
-                
-                # Keep chunk context with consistent MM:SS format
+
+                # Keep chunk context (already in MM:SS format from audio_chunker)
                 transcription["source_chunk"] = chunk_info.get("chunk_id")
-                transcription["chunk_start_time"] = self._seconds_to_time(self._time_to_seconds(chunk_info.get("start_time", "00:00")))
-                transcription["chunk_end_time"] = self._seconds_to_time(self._time_to_seconds(chunk_info.get("end_time", "00:00")))
-                
+                transcription["chunk_start_time"] = chunk_info.get("start_time", "00:00")
+                transcription["chunk_end_time"] = chunk_info.get("end_time", "00:00")
+
                 all_segments.append(transcription)
-            
+
             successful_chunks += 1
-        
-        # Sort by absolute timeline
-        all_segments.sort(key=lambda x: self._time_to_seconds(x["start"]))
+
+        # Sort by source_chunk first (ascending), then by segment_id within chunk
+        all_segments.sort(key=lambda x: (x.get("source_chunk", 0), x.get("segment_id", 0)))
         
         # Add speaker mapping if available
         if meeting_metadata and meeting_metadata.get("speaker_timeframes"):

@@ -40,18 +40,17 @@ def parse_timestamp(timestamp_str: str) -> float:
 
 def seconds_to_timestamp(seconds: float) -> str:
     """
-    Convert seconds to HH:MM:SS timestamp format.
-    
+    Convert seconds to MM:SS timestamp format.
+
     Args:
         seconds: Time in seconds
-        
+
     Returns:
-        Timestamp string in HH:MM:SS format
+        Timestamp string in MM:SS format
     """
-    hours = int(seconds // 3600)
-    minutes = int((seconds % 3600) // 60)
+    minutes = int(seconds // 60)
     secs = int(seconds % 60)
-    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"
 
 
 def group_segments_by_duration(segments: List[Dict], target_duration_minutes: float = 10.0) -> List[List[Dict]]:

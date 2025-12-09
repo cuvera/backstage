@@ -3,53 +3,56 @@ TRANSCRIPTION_AND_SENTIMENT_ANALYSIS_PROMPT=""""""
 TRANSCRIPTION_AND_SENTIMENT_ANALYSIS_PROMPT_ONLINE = """Transcribe the following audio file and provide accurate, verbatim transcription for each segment. The audio starts from {{start}} and ends at {{end}}.
 
 TIME SEGMENTS TO TRANSCRIBE:
-{{segment}}
+{{segments}}
 
 TRANSCRIPTION REQUIREMENTS:
-- Convert all speech to text accurately and verbatim
+- You MUST transcribe each segment listed above
+- Use the EXACT segment_id, start, and end times provided
+- Do NOT merge or skip segments, even if they overlap
 - Use proper punctuation, capitalization, and grammar
-- Create paragraph breaks for natural pauses or topic changes
 - Do not summarize or paraphrase - provide exact words spoken
 - sentiment for the segment eg. positive, negative, neutral, or mixed
 
 OUTPUT FORMAT:
 Please provide the transcription in JSON format with this structure:
 {
-  "transcriptions": [
-    {
-      "segment_id": <segment number eg. 1, 2, 3 ...>,
-      "start": <mm:ss>,
-      "end": <mm:ss>,
-      "transcription": <transcription text>,
-       "sentiment": <positive, negative, neutral, or mixed>
-    }
-  ]
-}
+    "transcriptions": [
+      {
+        "segment_id": <use the segment_id from input>,
+        "start": <MM:SS use the exact start time from input>,
+        "end": <MM:SS use the exact end time from input>,
+        "speaker": <use the label from input>,
+        "transcription": <text or empty string if no speech>,
+        "sentiment": <positive, negative, neutral, or mixed>
+      }
+    ]
+  }
 """
 
-TRANSCRIPTION_AND_SENTIMENT_ANALYSIS_PROMPT_OFFLINE = """Transcribe the following audio file and provide accurate, verbatim transcription for each segment.
+TRANSCRIPTION_AND_SENTIMENT_ANALYSIS_PROMPT_OFFLINE = """Transcribe the following audio file and provide accurate, verbatim transcription for each segment. The audio starts from {{start}} and ends at {{end}}.
 
 TRANSCRIPTION REQUIREMENTS:
-- Convert all speech to text accurately and verbatim
+- Create a new transcription entry for each distinct speech segment. A new segment should be started after a natural pause or a period of silence.
 - Use proper punctuation, capitalization, and grammar
-- Create paragraph breaks for natural pauses or topic changes
+- Do NOT merge or skip segments, even if they overlap
 - Do not summarize or paraphrase - provide exact words spoken
 - sentiment for the segment eg. positive, negative, neutral, or mixed
 
 OUTPUT FORMAT:
-Please provide the transcription in JSON format with this structure:
+Please provide the transcription in a strict JSON format. All start and end timestamps must be relative to the {{start}} start time (i.e., the audio segment begins at 00:00).
 {
   "transcriptions": [
     {
-      "segment_id": <segment number eg. 1, 2, 3 ...>,
-       "start": <mm:ss>,
-       "end": <mm:ss>,
-      "transcription": <transcription text>,
-       "sentiment": <positive, negative, neutral, or mixed>
+      "start": "<The MM:SS timestamp relative to the {{start}} start time>",
+      "end": "<The MM:SS timestamp relative to the {{start}} start time>",
+      "transcription": "<text or empty string if no speech>",
+      "sentiment": "<positive, negative, neutral, or mixed>"
     }
   ]
 }
 """
+
+# - Convert all speech to text accurately and verbatim
 
 
 MEETING_PREP_SUGGESTION_PROMPT = """You are an expert meeting operations assistant. Produce an Executive Prep Pack (one-pager) for an upcoming online, recurring meeting. Always ground the pack in at least one previous meeting plus the diarized transcript + sentiment context described in TRANSCRIPTION_AND_SENTIMENT_ANALYSIS_PROMPT.
