@@ -153,17 +153,8 @@ class MeetingAnalysisOrchestrator:
             if not analysis_doc:
                 call_analysis_agent = CallAnalysisAgent()
 
-                # duration in seconds, last turn end time - first turn start time
-                if transcription["conversation"] and len(transcription["conversation"]) > 0:
-                    duration = transcription["conversation"][-1]["end_time"] - transcription["conversation"][0]["start_time"]
-                else:
-                    duration = 0
-
                 analysis = await call_analysis_agent.analyze(
-                        transcript_payload={
-                            **transcription,
-                            "duration_sec": duration
-                        },
+                        transcript_payload=transcription,
                         context={
                             "tenant_id": tenant_id,
                             "session_id": meeting_id,
