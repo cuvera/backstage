@@ -101,17 +101,18 @@ class CallAnalysisAgent:
             transcriptions = candidate.get("transcriptions", [])
             conversation = []
             for t in transcriptions:
-                start_mmss = t.get("start", "00:00")
-                end_mmss = t.get("end", "00:00")
-                # Convert MM:SS to HH:MM:SS
-                start_hhmmss = self._mmss_to_hhmmss(start_mmss)
-                end_hhmmss = self._mmss_to_hhmmss(end_mmss)
-                conversation.append({
-                    "start_time": start_hhmmss,
-                    "end_time": end_hhmmss,
-                    "speaker": t.get("speaker", "Unknown"),
-                    "text": t.get("transcription", ""),
-                })
+                if len(str(t.get("transcription", ""))) > 0:
+                    start_mmss = t.get("start", "00:00")
+                    end_mmss = t.get("end", "00:00")
+                    # Convert MM:SS to HH:MM:SS
+                    start_hhmmss = self._mmss_to_hhmmss(start_mmss)
+                    end_hhmmss = self._mmss_to_hhmmss(end_mmss)
+                    conversation.append({
+                        "start_time": start_hhmmss,
+                        "end_time": end_hhmmss,
+                        "speaker": t.get("speaker", "Unknown"),
+                        "text": t.get("transcription", ""),
+                    })
             candidate["conversation"] = conversation
         
         if not candidate.get("conversation"):

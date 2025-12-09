@@ -393,10 +393,20 @@ class MeetingAnalysisOrchestrator:
                 organizer = attendees_list[0]
             
             # Calculate duration string
-            duration_sec = int(analysis.duration_sec)/1000 or 0
-            hours = int(duration_sec // 3600)
-            minutes = int((duration_sec % 3600) // 60)
-            duration_str = f"{hours} Hour {minutes} Minutes" if hours > 0 else f"{minutes} Minutes"
+            # Calculate duration string from HH:MM:SS format
+            duration_str = "0 Minutes"
+            if analysis.duration:
+                try:
+                    parts = analysis.duration.split(":")
+                    if len(parts) == 3:
+                        hours = int(parts[0])
+                        minutes = int(parts[1])
+                        duration_str = f"{hours} Hour {minutes} Minutes" if hours > 0 else f"{minutes} Minutes"
+                    elif len(parts) == 2:
+                        minutes = int(parts[0])
+                        duration_str = f"{minutes} Minutes"
+                except (ValueError, IndexError):
+                    pass
             
             # Send email notification
             send_email_notification(
