@@ -214,19 +214,38 @@ class CallAnalysisAgent:
         except ValueError:
             logger.warning(f"[CallAnalysisAgent] Invalid overall sentiment label: {sentiments.get('overall')}")
         
-        # 2. Get per-speaker sentiment from the 'participant' list
+        # 2. Get per-speaker sentiment from multiple possible sources
         per_speaker: Dict[str, SentimentLabel] = {}
+        
+        # First, try the 'participant' list from sentiments
         participants = sentiments.get("participant", [])
+        logger.info(f"[CallAnalysisAgent] Found {len(participants)} participants in sentiments.participant")
         for p in participants:
             name = (p.get("name") or "").strip()
             sentiment_str = (p.get("sentiment") or "neutral").strip()
             if name:
                 try:
                     per_speaker[name] = SentimentLabel(sentiment_str)
+                    logger.info(f"[CallAnalysisAgent] Added sentiment from participant: {name} = {sentiment_str}")
+                except ValueError:
+                    logger.warning(f"[CallAnalysisAgent] Invalid sentiment label for {name}: {sentiment_str}")
+                    per_speaker[name] = SentimentLabel.neutral
+        
+        # Second, try the 'speakers' array from the payload root (new format)
+        speakers = payload.get("speakers", [])
+        logger.info(f"[CallAnalysisAgent] Found {len(speakers)} speakers in payload.speakers")
+        for speaker_data in speakers:
+            name = (speaker_data.get("speaker") or "").strip()
+            sentiment_str = (speaker_data.get("sentiment") or "neutral").strip()
+            if name:
+                try:
+                    per_speaker[name] = SentimentLabel(sentiment_str)
+                    logger.info(f"[CallAnalysisAgent] Added sentiment from speaker: {name} = {sentiment_str}")
                 except ValueError:
                     logger.warning(f"[CallAnalysisAgent] Invalid sentiment label for {name}: {sentiment_str}")
                     per_speaker[name] = SentimentLabel.neutral
 
+        logger.info(f"[CallAnalysisAgent] Final per_speaker sentiment count: {len(per_speaker)}")
         return SentimentOverview(overall=overall, per_speaker=per_speaker)
 
 

@@ -81,12 +81,41 @@ class Turn(BaseModel):
 
     @validator("duration", always=True)
     def _ensure_duration(cls, v, values):
-        start = float(values.get("start_time", 0.0))
-        end = float(values.get("end_time", 0.0))
-        duration = float(v) if v is not None else max(0.0, end - start)
-        if duration < 0.0:
-            raise ValueError("duration must be positive")
-        return round(duration, 2)
+        """Calculate duration from start/end times if not provided.
+        
+        Handles HH:MM:SS format times by converting to seconds for calculation.
+        """
+        # Make duration optional - if provided, pass through as-is
+        if v is not None:
+            return v
+        
+        # Otherwise, calculate from start and end times
+        start_str = values.get("start_time", "00:00:00")
+        end_str = values.get("end_time", "00:00:00")
+        
+        # Parse HH:MM:SS to seconds
+        def parse_time(time_str):
+            try:
+                parts = time_str.split(":")
+                if len(parts) == 3:
+                    return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
+                elif len(parts) == 2:
+                    return int(parts[0]) * 60 + float(parts[1])
+                else:
+                    return 0.0
+            except (ValueError, IndexError):
+                return 0.0
+        
+        start_sec = parse_time(start_str)
+        end_sec = parse_time(end_str)
+        duration_sec = max(0.0, end_sec - start_sec)
+        
+        # Convert back to HH:MM:SS format
+        hours = int(duration_sec // 3600)
+        minutes = int((duration_sec % 3600) // 60)
+        seconds = int(duration_sec % 60)
+        
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
 
 class Participant(BaseModel):
