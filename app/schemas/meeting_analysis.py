@@ -72,6 +72,22 @@ class Turn(BaseModel):
         description="Duration in HH:MM:SS format. Auto-derived when omitted.",
     )
 
+    # @validator("end_time")
+    # def _end_after_start(cls, v, values):
+    #     start = values.get("start_time", 0.0)
+    #     if v <= start:
+    #         raise ValueError("end_time must be greater than start_time")
+    #     return v
+
+    @validator("duration", always=True)
+    def _ensure_duration(cls, v, values):
+        start = float(values.get("start_time", 0.0))
+        end = float(values.get("end_time", 0.0))
+        duration = float(v) if v is not None else max(0.0, end - start)
+        if duration < 0.0:
+            raise ValueError("duration must be positive")
+        return round(duration, 2)
+
 
 class Participant(BaseModel):
     name: str = Field(..., min_length=1)
