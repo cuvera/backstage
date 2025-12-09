@@ -11,6 +11,7 @@ from app.services.transcription_service import TranscriptionService
 from app.utils.audio_merger import merge_wav_files_from_s3, AudioMergerError
 from app.services.meeting_analysis_service import MeetingAnalysisService
 from app.repository import MeetingMetadataRepository
+from app.repository.transcription_v1_repository import TranscriptionV1Repository
 from app.utils.s3_client import download_s3_file
 from app.core.config import settings
 from app.services.agents import TranscriptionAgent, CallAnalysisAgent
@@ -107,12 +108,14 @@ class MeetingAnalysisOrchestrator:
             logger.info(f"Step 0 completed in {step_duration_ms}ms - meeting_id={meeting_id}")
 
             #################################################
-            # Step 1: Prepare audio file
+            # Step 1: Transcription with TranscriptionService v1
             #################################################
             step_start_time = time.time()
             logger.info(f"Step 1: Starting transcription process - meeting_id={meeting_id}")
-            transcription_service = TranscriptionService()
-            transcription = await transcription_service.get_transcription(meeting_id, tenant_id)
+
+            # Check if transcription v1 already exists
+            transcription_v1_repo = await TranscriptionV1Repository.from_default()
+            transcription = await transcription_v1_repo.get_transcription(meeting_id, tenant_id)
 
             if not transcription:
                 logger.info(f"Step 1.1: No existing transcription found, preparing audio file - meeting_id={meeting_id}")
@@ -123,17 +126,36 @@ class MeetingAnalysisOrchestrator:
                 if not file_url:
                     raise MeetingAnalysisOrchestratorError("Failed to prepare audio file")
 
-                # Step 1.2: Transcription with TranscriptionAgent
-                logger.info(f"Step 1.2: Starting audio transcription - meeting_id={meeting_id}")
-                transcription = await transcription_service.save_transcription(
+                # Step 1.2: Transcription with new TranscriptionService
+                logger.info(f"Step 1.2: Starting audio transcription with Gemini - meeting_id={meeting_id}")
+                transcription_service = TranscriptionService(max_concurrent=5)
+
+                transcription_result = await transcription_service.transcribe_meeting(
                     audio_file_path=file_url,
-                    meeting_id=meeting_id,
-                    tenant_id=tenant_id,
                     meeting_metadata=meeting_metadata,
+                    platform=platform,  # 'google' or 'offline'
+                    chunk_duration_minutes=10.0,
+                    overlap_seconds=5.0,
+                    output_dir=temp_directory
                 )
 
+                # Step 1.3: Save transcription v1 to database
+                logger.info(f"Step 1.3: Saving transcription v1 to database - meeting_id={meeting_id}")
+                save_result = await transcription_v1_repo.save_transcription(
+                    meeting_id=meeting_id,
+                    tenant_id=tenant_id,
+                    transcription_result=transcription_result
+                )
+                logger.info(
+                    f"Saved transcription v1: {save_result['total_segments']} segments, "
+                    f"{save_result['total_speakers']} speakers - meeting_id={meeting_id}"
+                )
+
+                # Get the saved transcription for downstream processing
+                transcription = await transcription_v1_repo.get_transcription(meeting_id, tenant_id)
+
             else:
-                logger.info(f"Step 1: Using existing transcription - meeting_id={meeting_id}")
+                logger.info(f"Step 1: Using existing transcription v1 - meeting_id={meeting_id}")
 
             step_duration_ms = round((time.time() - step_start_time) * 1000, 2)
             logger.info(f"Step 1 completed in {step_duration_ms}ms - meeting_id={meeting_id}")
