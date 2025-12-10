@@ -23,11 +23,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: 4G
-          cpus: '2'
-        reservations:
           memory: 2G
-          cpus: '1'
+          cpus: '0.5'
     logging:
       driver: "json-file"
       options:
