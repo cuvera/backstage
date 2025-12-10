@@ -345,7 +345,7 @@ class MeetingAnalysisOrchestrator:
 
         if not payload.get('fileUrl'):
             s3_folder_path = f"{payload.get('tenantId')}/{payload.get('platform')}/{payload.get('_id')}/"
-            output_s3_key = f"{payload.get('tenantId')}/{payload.get('platform')}/{payload.get('_id')}/meeting.wav"
+            output_s3_key = f"{payload.get('tenantId')}/{payload.get('platform')}/{payload.get('_id')}/meeting.m4a"
 
             merge_result = await merge_wav_files_from_s3(
                 s3_folder_path=s3_folder_path,
@@ -357,7 +357,7 @@ class MeetingAnalysisOrchestrator:
         else:
             # Preserve original file extension from S3 key
             s3_file_key = payload.get('fileUrl')
-            original_extension = Path(s3_file_key).suffix or '.wav'
+            original_extension = Path(s3_file_key).suffix or '.m4a'
             file_url = str(temp_dir / f"merged_output{original_extension}")
             await download_s3_file(s3_file_key, file_url, bucket)
 
