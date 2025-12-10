@@ -3,6 +3,7 @@ import json
 import logging
 import time
 import os
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from google import genai
@@ -78,6 +79,29 @@ class GeminiTranscriptionAgent:
 
         return False
 
+    def _get_mime_type(self, file_path: str) -> str:
+        """
+        Get MIME type for audio file based on extension.
+
+        Args:
+            file_path: Path to the audio file
+
+        Returns:
+            MIME type string
+        """
+        extension = Path(file_path).suffix.lower()
+        mime_types = {
+            '.m4a': 'audio/mp4',
+            '.mp4': 'audio/mp4',
+            '.mp3': 'audio/mpeg',
+            '.wav': 'audio/wav',
+            '.flac': 'audio/flac',
+            '.ogg': 'audio/ogg',
+            '.aac': 'audio/aac',
+            '.webm': 'audio/webm',
+        }
+        return mime_types.get(extension, 'audio/mpeg')  # Default to audio/mpeg
+
     async def _upload_audio_file(self, audio_file_path: str):
         """
         Upload audio file to Gemini Files API.
@@ -98,8 +122,16 @@ class GeminiTranscriptionAgent:
             
             logger.info(f"[Gemini Agent] Uploading audio file: {audio_file_path}")
             upload_start_time = time.time()
-            
-            uploaded_file = await asyncio.to_thread(self.client.files.upload, file=audio_file_path)
+
+            # Determine MIME type based on file extension
+            mime_type = self._get_mime_type(audio_file_path)
+            logger.info(f"[Gemini Agent] Using MIME type: {mime_type}")
+
+            uploaded_file = await asyncio.to_thread(
+                self.client.files.upload,
+                path=audio_file_path,
+                config={'mime_type': mime_type}
+            )
             
             # Wait for file processing
             while uploaded_file.state == "PROCESSING":
