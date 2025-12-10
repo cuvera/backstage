@@ -355,8 +355,11 @@ class MeetingAnalysisOrchestrator:
             )
             file_url = merge_result['local_merged_file_path']
         else:
-            file_url = str(temp_dir / "merged_output.wav")
-            await download_s3_file(payload.get('fileUrl'), file_url, bucket)
+            # Preserve original file extension from S3 key
+            s3_file_key = payload.get('fileUrl')
+            original_extension = Path(s3_file_key).suffix or '.wav'
+            file_url = str(temp_dir / f"merged_output{original_extension}")
+            await download_s3_file(s3_file_key, file_url, bucket)
 
         # Validate file size
         if os.path.exists(file_url):

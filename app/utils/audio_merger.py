@@ -260,8 +260,9 @@ async def merge_local_audio_files(file_paths: List[str]) -> tuple[np.ndarray, in
             signal, sr = audiofile.read(file_path)
             
             # Convert to mono if stereo
+            # audiofile returns shape (channels, samples), so average across channels (axis=0)
             if signal.ndim > 1:
-                signal = np.mean(signal, axis=1)
+                signal = np.mean(signal, axis=0)
             
             # Set sample rate from first file
             if sample_rate is None:
