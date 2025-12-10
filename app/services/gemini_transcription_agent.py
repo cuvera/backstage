@@ -23,6 +23,11 @@ class TruncationError(TranscriptionAgentError):
     pass
 
 
+class EmptyResponseError(TranscriptionAgentError):
+    """Exception raised when model returns empty response."""
+    pass
+
+
 class GeminiTranscriptionAgent:
     """
     Gemini transcription agent with model fallback capability.
@@ -55,6 +60,10 @@ class GeminiTranscriptionAgent:
         Returns:
             True if error is retryable, False otherwise
         """
+        # Empty response errors - retry with fallback model
+        if isinstance(error, EmptyResponseError):
+            return True
+
         # Token limit truncation errors - retry with more capable model
         if isinstance(error, TruncationError):
             return True
@@ -167,6 +176,7 @@ class GeminiTranscriptionAgent:
         model: str,
         prompt: str,
         uploaded_file,
+        timeout_seconds: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Transcribe audio using specific Gemini model.
@@ -175,6 +185,7 @@ class GeminiTranscriptionAgent:
             model: Gemini model name
             prompt: Custom transcription prompt
             uploaded_file: Uploaded file object
+            timeout_seconds: Timeout in seconds (default: 300 for flash, 600 for pro)
 
         Returns:
             Transcription result dictionary
@@ -185,19 +196,31 @@ class GeminiTranscriptionAgent:
         # Set max_output_tokens based on model capabilities
         max_tokens = 20000 if "flash" in model else 65535
 
-        response = await asyncio.to_thread(
-            self.client.models.generate_content,
-            model=model,
-            contents=[
-                prompt,
-                uploaded_file
-            ],
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                temperature=0.0,
-                max_output_tokens=max_tokens
+        # Set default timeout based on model
+        if timeout_seconds is None:
+            timeout_seconds = 180 if "flash" in model else 300
+
+        try:
+            # Wrap generate_content with timeout
+            response = await asyncio.wait_for(
+                asyncio.to_thread(
+                    self.client.models.generate_content,
+                    model=model,
+                    contents=[
+                        prompt,
+                        uploaded_file
+                    ],
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        temperature=0.0,
+                        max_output_tokens=max_tokens
+                    )
+                ),
+                timeout=timeout_seconds
             )
-        )
+        except asyncio.TimeoutError:
+            logger.warning(f"[Gemini Agent] Model {model} timed out after {timeout_seconds}s")
+            raise EmptyResponseError(f"Model {model} timed out after {timeout_seconds}s")
 
         llm_duration_ms = round((time.time() - llm_start_time) * 1000, 2)
         logger.info(f"[Gemini Agent] Transcription completed with {model} in {llm_duration_ms}ms")
@@ -205,7 +228,8 @@ class GeminiTranscriptionAgent:
         response_content = response.text
 
         if not response_content:
-            raise TranscriptionAgentError(f"Model {model} returned empty response")
+            logger.warning(f"[Gemini Agent] Model {model} returned empty response")
+            raise EmptyResponseError(f"Model {model} returned empty response")
 
         # Check if response was truncated before parsing
         is_truncated = response.candidates[0].finish_reason == "MAX_TOKENS"
