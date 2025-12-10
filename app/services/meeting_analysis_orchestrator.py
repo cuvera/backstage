@@ -5,6 +5,7 @@ from typing import Dict, Any
 import time
 from datetime import datetime
 import shutil
+from pathlib import Path
 
 from app.schemas.meeting_analysis import MeetingAnalysis
 from app.services.transcription_service import TranscriptionService
@@ -35,9 +36,29 @@ class MeetingAlreadyProcessedException(Exception):
 
 class MeetingAnalysisOrchestrator:
     """Main service for orchestrating meeting processing pipeline."""
-    
+
     def __init__(self):
         self.meeting_metadata_repo = None  # Will be initialized when needed
+        self._ensure_temp_directory()
+
+    def _ensure_temp_directory(self) -> None:
+        """Ensure temp directory exists and has sufficient space."""
+        temp_dir = Path(settings.TEMP_AUDIO_DIR)
+
+        # Create directory if it doesn't exist
+        temp_dir.mkdir(parents=True, exist_ok=True)
+
+        # Check available disk space
+        stat = shutil.disk_usage(temp_dir)
+        free_gb = stat.free / (1024 ** 3)
+
+        if free_gb < settings.MIN_FREE_DISK_SPACE_GB:
+            logger.warning(
+                f"Low disk space in temp directory: {free_gb:.2f}GB free, "
+                f"minimum required: {settings.MIN_FREE_DISK_SPACE_GB}GB"
+            )
+
+        logger.info(f"Temp directory initialized: {temp_dir} ({free_gb:.2f}GB free)")
     
     async def analyze_meeting(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -277,7 +298,7 @@ class MeetingAnalysisOrchestrator:
             if platform == "google":
                 if not self.meeting_metadata_repo:
                     self.meeting_metadata_repo = await MeetingMetadataRepository.from_default()
-                
+
                 await self.meeting_metadata_repo.update_meeting_status(meeting_id, platform, status)
                 logger.info(f"Updated meeting {meeting_id} status to {status} for platform {platform}")
             elif platform == "offline":
@@ -298,9 +319,30 @@ class MeetingAnalysisOrchestrator:
     async def _prepare_audio_file(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Prepare audio file for processing."""
         bucket = payload.get('bucket', settings.MEETING_BUCKET_NAME)
-        temp_dir = tempfile.mkdtemp(prefix="audio_merge_", suffix=datetime.now().strftime("_%Y%m%d_%H%M%S"))
+
+        # Use configured temp directory instead of system temp
+        temp_base_dir = Path(settings.TEMP_AUDIO_DIR)
+        temp_base_dir.mkdir(parents=True, exist_ok=True)
+
+        # Check disk space before creating temp directory
+        stat = shutil.disk_usage(temp_base_dir)
+        free_gb = stat.free / (1024 ** 3)
+
+        if free_gb < settings.MIN_FREE_DISK_SPACE_GB:
+            raise MeetingAnalysisOrchestratorError(
+                f"Insufficient disk space: {free_gb:.2f}GB free, "
+                f"minimum required: {settings.MIN_FREE_DISK_SPACE_GB}GB"
+            )
+
+        # Create meeting-specific temp directory
+        meeting_id = payload.get('_id')
+        temp_dir_name = f"audio_merge_{meeting_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        temp_dir = temp_base_dir / temp_dir_name
+        temp_dir.mkdir(parents=True, exist_ok=True)
+
+        logger.info(f"Created temp directory: {temp_dir} ({free_gb:.2f}GB free)")
         file_url = None
-        
+
         if not payload.get('fileUrl'):
             s3_folder_path = f"{payload.get('tenantId')}/{payload.get('platform')}/{payload.get('_id')}/"
             output_s3_key = f"{payload.get('tenantId')}/{payload.get('platform')}/{payload.get('_id')}/meeting.wav"
@@ -309,16 +351,27 @@ class MeetingAnalysisOrchestrator:
                 s3_folder_path=s3_folder_path,
                 output_s3_key=output_s3_key,
                 bucket_name=bucket,
-                temp_dir=temp_dir
+                temp_dir=str(temp_dir)
             )
             file_url = merge_result['local_merged_file_path']
         else:
-            file_url = os.path.join(temp_dir, "merged_output.wav")
+            file_url = str(temp_dir / "merged_output.wav")
             await download_s3_file(payload.get('fileUrl'), file_url, bucket)
+
+        # Validate file size
+        if os.path.exists(file_url):
+            file_size_mb = os.path.getsize(file_url) / (1024 ** 2)
+            logger.info(f"Audio file size: {file_size_mb:.2f}MB")
+
+            if file_size_mb > settings.MAX_AUDIO_FILE_SIZE_MB:
+                logger.warning(
+                    f"Audio file exceeds maximum size: {file_size_mb:.2f}MB > "
+                    f"{settings.MAX_AUDIO_FILE_SIZE_MB}MB"
+                )
 
         return {
             'local_merged_file_path': file_url,
-            'temp_directory': temp_dir
+            'temp_directory': str(temp_dir)
         }
 
     async def _send_meeting_completion_email(

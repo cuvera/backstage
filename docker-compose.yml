@@ -11,6 +11,23 @@ services:
     restart: unless-stopped
     networks:
       - cuvera-network
+    volumes:
+      # tmpfs for temporary audio files (recommended for production)
+      - type: tmpfs
+        target: /data
+        tmpfs:
+          size: 10G
+          mode: 1777
+      # Alternative: Use persistent volume for debugging
+      # - ./data:/data
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2'
+        reservations:
+          memory: 2G
+          cpus: '1'
     logging:
       driver: "json-file"
       options:

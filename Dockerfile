@@ -23,6 +23,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf 
 # Create non-root user (Debian/Ubuntu syntax)
 RUN groupadd -r appuser && useradd -r -g appuser appuser
 
+# Create data directory with proper permissions
+RUN mkdir -p /data && \
+    chown -R appuser:appuser /data && \
+    chmod 1777 /data
+
 WORKDIR /app
 
 # Copy installed packages from builder
