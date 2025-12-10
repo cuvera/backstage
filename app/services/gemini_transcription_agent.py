@@ -18,6 +18,11 @@ class TranscriptionAgentError(Exception):
     pass
 
 
+class TruncationError(TranscriptionAgentError):
+    """Exception raised when response is truncated due to token limits."""
+    pass
+
+
 class GeminiTranscriptionAgent:
     """
     Gemini transcription agent with model fallback capability.
@@ -50,6 +55,10 @@ class GeminiTranscriptionAgent:
         Returns:
             True if error is retryable, False otherwise
         """
+        # Token limit truncation errors - retry with more capable model
+        if isinstance(error, TruncationError):
+            return True
+
         error_message = str(error).lower()
 
         # Rate limiting errors
@@ -173,6 +182,9 @@ class GeminiTranscriptionAgent:
         logger.info(f"[Gemini Agent] Starting transcription with model: {model}")
         llm_start_time = time.time()
 
+        # Set max_output_tokens based on model capabilities
+        max_tokens = 20000 if "flash" in model else 65535
+
         response = await asyncio.to_thread(
             self.client.models.generate_content,
             model=model,
@@ -182,7 +194,8 @@ class GeminiTranscriptionAgent:
             ],
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
-                temperature=0.0
+                temperature=0.0,
+                max_output_tokens=max_tokens
             )
         )
 
@@ -194,17 +207,31 @@ class GeminiTranscriptionAgent:
         if not response_content:
             raise TranscriptionAgentError(f"Model {model} returned empty response")
 
+        # Check if response was truncated before parsing
+        is_truncated = response.candidates[0].finish_reason == "MAX_TOKENS"
+        if is_truncated:
+            logger.warning(f"[Gemini Agent] Response from {model} was truncated due to token limit")
+
         # Parse JSON response
         try:
-            # Check if response was truncated
-            if response.candidates[0].finish_reason == "MAX_TOKENS":
-                logger.warning(f"[Gemini Agent] Response from {model} was truncated due to token limit")
-
             result = json.loads(response_content)
+
+            # If truncated but JSON is valid, log warning but continue
+            if is_truncated:
+                logger.warning(f"[Gemini Agent] Truncated response from {model} was still valid JSON")
+
             logger.info(f"[Gemini Agent] Successfully parsed response from {model}")
             return result
 
         except json.JSONDecodeError as e:
+            # If truncation caused malformed JSON, raise TruncationError for retry
+            if is_truncated:
+                logger.error(f"[Gemini Agent] Response from {model} truncated and malformed JSON: {e}")
+                logger.error(f"Response content length: {len(response_content)}")
+                logger.error(f"Last 500 chars: {response_content[-500:]}")
+                raise TruncationError(f"Response truncated and malformed from {model}: {e}")
+
+            # Non-truncation JSON errors are non-retryable
             logger.error(f"[Gemini Agent] Failed to parse response from {model} as JSON: {e}")
             logger.error(f"Response content length: {len(response_content)}")
             logger.error(f"Last 500 chars: {response_content[-500:]}")
