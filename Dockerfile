@@ -21,6 +21,7 @@ FROM python:3.11-slim AS production
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ffmpeg \
+    mediainfo \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user (Debian/Ubuntu syntax)
