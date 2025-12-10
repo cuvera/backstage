@@ -110,7 +110,7 @@ def _merge_audio_files_ffmpeg(
                 '-c', 'copy',
                 '-y',
                 output_path
-            ], check=True, capture_output=True, stderr=subprocess.PIPE)
+            ], check=True, capture_output=True)
         else:
             # Need to re-encode to output format
             logger.info(f"Converting inputs to {output_format}")
@@ -137,13 +137,14 @@ def _merge_audio_files_ffmpeg(
                 *codec_args,
                 '-y',
                 output_path
-            ], check=True, capture_output=True, stderr=subprocess.PIPE)
+            ], check=True, capture_output=True)
 
         logger.info(f"Merged audio file created: {output_path}")
         return output_path
 
     except subprocess.CalledProcessError as e:
-        raise AudioMergerError(f"ffmpeg merge failed: {e.stderr.decode()}")
+        stderr_output = e.stderr.decode(errors='replace') if e.stderr else str(e)
+        raise AudioMergerError(f"ffmpeg merge failed: {stderr_output}")
     finally:
         if os.path.exists(concat_list_path):
             os.remove(concat_list_path)
@@ -212,7 +213,6 @@ async def merge_wav_files_from_s3(
             duration_seconds = metadata['duration']
 
             result = {
-                "file": file_path,
                 "local_merged_file_path": file_path,
                 "merged_file_s3_key": output_s3_key,
                 "total_files_merged": len(wav_files),
@@ -294,12 +294,13 @@ async def merge_wav_files_from_s3(
         cleanup_start_time = time.time()
         cleaned_files_count = 0
         
-        # Cleanup temporary files (except merged_output.wav which orchestrator handles)
+        # Cleanup temporary files (except merged_output.* which orchestrator handles)
         if temp_dir and os.path.exists(temp_dir):
             import shutil
             try:
                 for file in os.listdir(temp_dir):
-                    if file != "merged_output.wav":
+                    # Keep merged output file (any extension: .m4a, .wav, etc.)
+                    if not file.startswith("merged_output."):
                         file_path = os.path.join(temp_dir, file)
                         if os.path.isfile(file_path):
                             os.remove(file_path)

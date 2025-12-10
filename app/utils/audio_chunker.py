@@ -2,6 +2,7 @@ import logging
 import os
 import tempfile
 import subprocess
+import json
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
@@ -150,8 +151,7 @@ class AudioChunker:
                 file_path
             ], capture_output=True, text=True, check=True)
 
-            import json as json_module
-            data = json_module.loads(result.stdout)
+            data = json.loads(result.stdout)
 
             duration = float(data['format']['duration'])
             # Get sample rate from first audio stream
@@ -203,9 +203,10 @@ class AudioChunker:
 
             cmd.extend(['-y', output_path])  # Overwrite if exists
 
-            subprocess.run(cmd, check=True, capture_output=True, stderr=subprocess.PIPE)
+            subprocess.run(cmd, check=True, capture_output=True)
         except subprocess.CalledProcessError as e:
-            raise AudioChunkerError(f"ffmpeg chunk extraction failed: {e.stderr.decode()}")
+            stderr_output = e.stderr.decode(errors='replace') if e.stderr else str(e)
+            raise AudioChunkerError(f"ffmpeg chunk extraction failed: {stderr_output}")
         except Exception as e:
             raise AudioChunkerError(f"Failed to extract chunk: {e}")
         
