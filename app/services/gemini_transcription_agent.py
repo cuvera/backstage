@@ -129,8 +129,8 @@ class GeminiTranscriptionAgent:
 
             uploaded_file = await asyncio.to_thread(
                 self.client.files.upload,
-                path=audio_file_path,
-                config={'mime_type': mime_type}
+                file=audio_file_path,
+                config=types.UploadFileConfig(mime_type=mime_type)
             )
             
             # Wait for file processing

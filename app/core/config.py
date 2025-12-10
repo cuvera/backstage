@@ -85,7 +85,7 @@ class Settings(BaseSettings):
     TEMP_AUDIO_DIR: str = Field(default="/data", env="TEMP_AUDIO_DIR")
     TEMP_FILE_MAX_AGE_HOURS: int = Field(default=24, env="TEMP_FILE_MAX_AGE_HOURS")
     MAX_AUDIO_FILE_SIZE_MB: int = Field(default=1000, env="MAX_AUDIO_FILE_SIZE_MB")
-    MIN_FREE_DISK_SPACE_GB: int = Field(default=5, env="MIN_FREE_DISK_SPACE_GB")
+    MIN_FREE_DISK_SPACE_GB: int = Field(default=1, env="MIN_FREE_DISK_SPACE_GB")
 
     class Config:
         env_file = ".env"
