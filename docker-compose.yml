@@ -12,14 +12,9 @@ services:
     networks:
       - cuvera-network
     volumes:
-      # tmpfs for temporary audio files (recommended for production)
-      - type: tmpfs
+      - type: volume
+        source: backstage-temp-data
         target: /data
-        tmpfs:
-          size: 10G
-          mode: 1777
-      # Alternative: Use persistent volume for debugging
-      # - ./data:/data
     deploy:
       resources:
         limits:
@@ -30,6 +25,10 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+volumes:
+  backstage-temp-data:
+    driver: local
 
 networks:
   cuvera-network:
