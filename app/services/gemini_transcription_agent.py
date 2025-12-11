@@ -36,19 +36,31 @@ class GeminiTranscriptionAgent:
     transcriptions with segment-level output and sentiment analysis.
     """
 
-    def __init__(self, models: Optional[List[str]] = None):
+    def __init__(self, models: Optional[List[Dict[str, Any]]] = None):
         """
         Initialize Gemini transcription agent.
-        
+
         Args:
-            models: List of Gemini models to try in order (fallback chain)
+            models: List of model configs with 'model', 'timeout', 'max_tokens'
+                    Example: [
+                        {"model": "gemini-2.0-flash-exp", "timeout": 180, "max_tokens": 20000},
+                        {"model": "gemini-1.5-pro", "timeout": 300, "max_tokens": 65535}
+                    ]
         """
         if not settings.GEMINI_API_KEY:
             raise TranscriptionAgentError("GEMINI_API_KEY is required for Gemini agent")
-        
+
         self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
-        self.models = models or ["gemini-2.5-flash", "gemini-2.5-pro"]
-        logger.info(f"[Gemini Agent] Initialized with fallback chain: {' -> '.join(self.models)}")
+
+        # Default configs if none provided
+        self.models = models or [
+            {"model": "gemini-2.0-flash", "timeout": 90, "max_tokens": 20000},
+            {"model": "gemini-2.0-flash", "timeout": 180, "max_tokens": 24000},
+            {"model": "gemini-1.5-pro", "timeout": 300, "max_tokens": 65535}
+        ]
+
+        model_names = [m["model"] for m in self.models]
+        logger.info(f"[Gemini Agent] Initialized with fallback chain: {' -> '.join(model_names)}")
 
     def _is_retryable_error(self, error: Exception) -> bool:
         """
@@ -173,32 +185,28 @@ class GeminiTranscriptionAgent:
 
     async def _transcribe_with_model(
         self,
-        model: str,
+        model_config: Dict[str, Any],
         prompt: str,
-        uploaded_file,
-        timeout_seconds: Optional[int] = None
+        uploaded_file
     ) -> Dict[str, Any]:
         """
         Transcribe audio using specific Gemini model.
 
         Args:
-            model: Gemini model name
+            model_config: Dict with 'model', 'timeout', 'max_tokens'
             prompt: Custom transcription prompt
             uploaded_file: Uploaded file object
-            timeout_seconds: Timeout in seconds (default: 300 for flash, 600 for pro)
 
         Returns:
             Transcription result dictionary
         """
-        logger.info(f"[Gemini Agent] Starting transcription with model: {model}")
+        model = model_config["model"]
+        timeout_seconds = model_config.get("timeout", 180)
+        max_tokens = model_config.get("max_tokens", 20000)
+
+        logger.info(f"[Gemini Agent] Starting transcription with model: {model} "
+                    f"(timeout: {timeout_seconds}s, max_tokens: {max_tokens})")
         llm_start_time = time.time()
-
-        # Set max_output_tokens based on model capabilities
-        max_tokens = 20000 if "flash" in model else 65535
-
-        # Set default timeout based on model
-        if timeout_seconds is None:
-            timeout_seconds = 180 if "flash" in model else 300
 
         try:
             # Wrap generate_content with timeout
@@ -323,30 +331,33 @@ class GeminiTranscriptionAgent:
             uploaded_file = await self._upload_audio_file(audio_file_path)
 
             # Try each model in the fallback chain
-            for model_idx, model in enumerate(self.models):
+            for model_idx, model_config in enumerate(self.models):
                 try:
-                    logger.info(f"[Gemini Agent] Attempting transcription with {model} "
+                    model_name = model_config["model"]
+                    logger.info(f"[Gemini Agent] Attempting transcription with {model_name} "
                                f"({model_idx + 1}/{len(self.models)})")
 
                     raw_result = await self._transcribe_with_model(
-                        model, prompt, uploaded_file,
+                        model_config, prompt, uploaded_file
                     )
                     formatted_result = self._format_to_segments(raw_result)
 
-                    logger.info(f"[Gemini Agent] Successfully transcribed with {model}")
+                    logger.info(f"[Gemini Agent] Successfully transcribed with {model_name}")
                     return formatted_result
 
                 except Exception as e:
                     last_exception = e
+                    model_name = model_config["model"]
 
                     if self._is_retryable_error(e):
-                        logger.warning(f"[Gemini Agent] Model {model} failed with retryable error: {e}")
+                        logger.warning(f"[Gemini Agent] Model {model_name} failed with retryable error: {e}")
                         if model_idx < len(self.models) - 1:
-                            logger.info(f"[Gemini Agent] Falling back to next model: {self.models[model_idx + 1]}")
+                            next_model = self.models[model_idx + 1]["model"]
+                            logger.info(f"[Gemini Agent] Falling back to next model: {next_model}")
                             continue
                     else:
-                        logger.error(f"[Gemini Agent] Model {model} failed with non-retryable error: {e}")
-                        raise TranscriptionAgentError(f"Non-retryable error with {model}: {e}") from e
+                        logger.error(f"[Gemini Agent] Model {model_name} failed with non-retryable error: {e}")
+                        raise TranscriptionAgentError(f"Non-retryable error with {model_name}: {e}") from e
 
             # All models failed
             logger.error(f"[Gemini Agent] All models failed. Last error: {last_exception}")
@@ -372,16 +383,20 @@ class GeminiTranscriptionAgent:
 async def transcribe(
     prompt: str,
     audio_file_path: str,
-    models: Optional[List[str]] = None
+    models: Optional[List[Dict[str, Any]]] = None
 ) -> Dict[str, Any]:
     """
     Convenience function to transcribe audio with custom prompt.
-    
+
     Args:
         prompt: Custom transcription prompt
         audio_file_path: Path to the audio file
-        models: Optional list of models for fallback chain
-        
+        models: Optional list of model configs
+                Example: [
+                    {"model": "gemini-2.0-flash-exp", "timeout": 180, "max_tokens": 20000},
+                    {"model": "gemini-1.5-pro", "timeout": 300, "max_tokens": 65535}
+                ]
+
     Returns:
         Dictionary containing transcriptions array
     """

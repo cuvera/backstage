@@ -131,19 +131,23 @@ class TranscriptionService:
         return chunks
     
     async def _transcribe_chunk_with_semaphore(
-        self, 
-        prompt: str, 
-        audio_file_path: str, 
-        models: Optional[List[str]] = None
+        self,
+        prompt: str,
+        audio_file_path: str,
+        models: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
         """
         Transcribe a single chunk with semaphore control
-        
+
         Args:
             prompt: Transcription prompt
             audio_file_path: Path to audio chunk
-            models: Optional list of models for fallback chain
-            
+            models: Optional list of model configs for fallback chain
+                    Example: [
+                        {"model": "gemini-2.0-flash-exp", "timeout": 180, "max_tokens": 20000},
+                        {"model": "gemini-1.5-pro", "timeout": 300, "max_tokens": 65535}
+                    ]
+
         Returns:
             Transcription result
         """
@@ -151,23 +155,23 @@ class TranscriptionService:
             return await transcribe(
                 prompt=prompt,
                 audio_file_path=audio_file_path,
-                models=models or []
+                models=models
             )
     
     async def _transcribe_chunks_parallel(
-        self, 
-        chunks: List[Dict], 
+        self,
+        chunks: List[Dict],
         platform: str,
-        models: Optional[List[str]] = None
+        models: Optional[List[Dict[str, Any]]] = None
     ) -> List[Dict[str, Any]]:
         """
         Transcribe all chunks in parallel with semaphore limiting concurrency
-        
+
         Args:
             chunks: List of audio chunks
             platform: "online" or "offline" for prompt selection
-            models: Optional list of models for fallback chain
-            
+            models: Optional list of model configs for fallback chain
+
         Returns:
             List of transcription results
         """
@@ -426,18 +430,18 @@ class TranscriptionService:
         return merged_result
     
     async def transcribe_meeting(
-        self, 
-        audio_file_path: str, 
-        meeting_metadata: Dict, 
+        self,
+        audio_file_path: str,
+        meeting_metadata: Dict,
         platform: str = "online",
         chunk_duration_minutes: float = 10.0,
         overlap_seconds: float = 5.0,
         output_dir: str = './chunks/',
-        models: Optional[List[str]] = None
+        models: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
         """
         Main method to transcribe a meeting with platform-specific chunking and parallel processing
-        
+
         Args:
             audio_file_path: Path to the audio file
             meeting_metadata: Meeting metadata containing speaker_timeframes for online platform
@@ -445,8 +449,12 @@ class TranscriptionService:
             chunk_duration_minutes: Duration of each chunk in minutes
             overlap_seconds: Overlap between chunks in seconds
             output_dir: Output directory for chunks
-            models: Optional list of models for fallback chain
-            
+            models: Optional list of model configs for fallback chain
+                    Example: [
+                        {"model": "gemini-2.0-flash-exp", "timeout": 180, "max_tokens": 20000},
+                        {"model": "gemini-1.5-pro", "timeout": 300, "max_tokens": 65535}
+                    ]
+
         Returns:
             Merged transcription result with metadata
         """
