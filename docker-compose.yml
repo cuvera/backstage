@@ -15,11 +15,11 @@ services:
       - type: volume
         source: backstage-temp-data
         target: /data
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-          cpus: '0.5'
+    # deploy:
+    #   resources:
+    #     limits:
+    #       memory: 2G
+    #       cpus: '0.5'
     logging:
       driver: "json-file"
       options:
