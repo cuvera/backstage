@@ -254,6 +254,7 @@ class TranscriptionService:
         """
         Map speaker names to transcription segments based on timeframes.
         Uses maximum overlap logic to handle overlapping speaker timeframes.
+        When overlaps are equal, prefers the more specific (shorter) timeframe.
         """
         speaker_timeframes = meeting_metadata.get("speaker_timeframes", [])
 
@@ -272,18 +273,23 @@ class TranscriptionService:
 
             best_match = None
             max_overlap = 0
+            best_duration = float('inf')  # Track duration of best match
 
             for speaker_frame in speaker_timeframes_mmss:
                 speaker_start = self._time_to_seconds(speaker_frame["start"])
                 speaker_end = self._time_to_seconds(speaker_frame["end"])
+                speaker_duration = speaker_end - speaker_start
 
                 # Calculate overlap duration
                 overlap_start = max(segment_start, speaker_start)
                 overlap_end = min(segment_end, speaker_end)
                 overlap_duration = max(0, overlap_end - overlap_start)
 
-                if overlap_duration > max_overlap:
+                # Prefer higher overlap, or if equal overlap, prefer shorter (more specific) timeframe
+                if (overlap_duration > max_overlap or
+                    (overlap_duration == max_overlap and speaker_duration < best_duration)):
                     max_overlap = overlap_duration
+                    best_duration = speaker_duration
                     best_match = speaker_frame["speaker_name"]
 
             segment["speaker"] = best_match if best_match else "Unknown"
