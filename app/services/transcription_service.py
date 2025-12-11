@@ -343,30 +343,44 @@ class TranscriptionService:
     def _merge_transcription_results(self, transcription_results: List[Dict[str, Any]], meeting_metadata: Dict = None) -> Dict[str, Any]:
         """
         Merge all chunk transcription results into a single transcription with absolute timeline and speaker mapping
-        
+
         Args:
             transcription_results: List of transcription results from chunks
             meeting_metadata: Meeting metadata containing speaker_timeframes
-            
+
         Returns:
             Merged transcription result with absolute timeline, speaker mapping, and speaker summary
+
+        Raises:
+            ValueError: If any chunks failed to transcribe
         """
         logger.info(f"[TranscriptionService] Merging {len(transcription_results)} transcription results")
-        
-        all_segments = []
-        successful_chunks = 0
+
+        # Count failed chunks first
         failed_chunks = 0
-        
+        failed_chunk_ids = []
         for result in transcription_results:
             chunk_info = result.get("chunk_info", {})
-            
             if "error" in chunk_info:
                 failed_chunks += 1
-                logger.warning(f"[TranscriptionService] Skipping failed chunk {chunk_info.get('chunk_id')}")
-                continue
-                
+                chunk_id = chunk_info.get('chunk_id', 'unknown')
+                failed_chunk_ids.append(chunk_id)
+                logger.error(f"[TranscriptionService] Chunk {chunk_id} failed: {chunk_info.get('error')}")
+
+        # Fail if any chunks failed
+        if failed_chunks > 0:
+            raise ValueError(
+                f"Transcription incomplete: {failed_chunks}/{len(transcription_results)} chunks failed "
+                f"(chunk IDs: {failed_chunk_ids}). Cannot merge partial results."
+            )
+
+        all_segments = []
+
+        for result in transcription_results:
+            chunk_info = result.get("chunk_info", {})
+
             chunk_start_seconds = self._time_to_seconds(chunk_info.get("start_time", "00:00"))
-            
+
             transcriptions = result.get("transcriptions", [])
             for transcription in transcriptions:
                 # Convert relative timestamps to absolute timeline
@@ -388,8 +402,6 @@ class TranscriptionService:
 
                 all_segments.append(transcription)
 
-            successful_chunks += 1
-
         # Sort by source_chunk first (ascending), then by segment_id within chunk
         all_segments.sort(key=lambda x: (x.get("source_chunk", 0), x.get("segment_id", 0)))
         
@@ -405,14 +417,12 @@ class TranscriptionService:
             "speakers": speakers_summary,
             "metadata": {
                 "total_segments": len(all_segments),
-                "successful_chunks": successful_chunks,
-                "failed_chunks": failed_chunks,
                 "total_chunks": len(transcription_results),
                 "has_speaker_mapping": bool(meeting_metadata and meeting_metadata.get("speaker_timeframes"))
             }
         }
         
-        logger.info(f"[TranscriptionService] Merged transcription complete: {len(all_segments)} segments from {successful_chunks}/{len(transcription_results)} chunks")
+        logger.info(f"[TranscriptionService] Merged transcription complete: {len(all_segments)} segments from {len(transcription_results)} chunks")
         return merged_result
     
     async def transcribe_meeting(
