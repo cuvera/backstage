@@ -345,14 +345,12 @@ class AudioChunker:
 
             # Get audio duration using ffprobe (no memory loading)
             total_duration_seconds = self._get_audio_duration_ffprobe(input_file_path)
-
-            logger.info(f"DEBUG: Audio file: {input_file_path}")
-            logger.info(f"DEBUG: Detected duration: {total_duration_seconds} seconds")
+            logger.info(f"Audio duration: {total_duration_seconds} seconds")
 
             # Group segments by target duration
             grouped_segments = group_segments_by_duration(segments, self.chunk_duration_minutes)
 
-            logger.info(f"Created {len(grouped_segments)} chunk groups from segments")
+            logger.info(f"Created {len(grouped_segments)} chunk groups from {len(segments)} segments")
 
             # Determine output format
             output_ext = '.m4a'
@@ -412,10 +410,10 @@ class AudioChunker:
                     "segments": relative_segments
                 }
                 chunks.append(chunk_info)
-                
+
                 logger.debug(f"Created chunk {chunk_index}: {chunk_info['start_time']} - {chunk_info['end_time']} "
                            f"({len(segment_group)} segments)")
-            
+
             logger.info(f"Successfully created {len(chunks)} segment-based audio chunks in: {output_dir}")
             return chunks
             
@@ -452,7 +450,7 @@ def chunk_audio_by_segments(
     input_file_path: str,
     segments_data: Dict,
     chunk_duration_minutes: float = 10.0,
-    overlap_seconds: float = 5.0,
+    overlap_seconds: float = 0.0,
     output_dir: Optional[str] = None,
     output_prefix: str = "segment_chunk"
 ) -> List[Dict[str, Any]]:

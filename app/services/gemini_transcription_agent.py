@@ -44,7 +44,7 @@ class GeminiTranscriptionAgent:
             models: List of model configs with 'model', 'timeout', 'max_tokens'
                     Example: [
                         {"model": "gemini-2.0-flash-exp", "timeout": 180, "max_tokens": 20000},
-                        {"model": "gemini-1.5-pro", "timeout": 300, "max_tokens": 65535}
+                        {"model": "gemini-2.5-pro", "timeout": 300, "max_tokens": 65535}
                     ]
         """
         if not settings.GEMINI_API_KEY:
@@ -54,9 +54,9 @@ class GeminiTranscriptionAgent:
 
         # Default configs if none provided
         self.models = models or [
-            {"model": "gemini-2.0-flash", "timeout": 90, "max_tokens": 20000},
-            {"model": "gemini-2.0-flash", "timeout": 180, "max_tokens": 24000},
-            {"model": "gemini-1.5-pro", "timeout": 300, "max_tokens": 65535}
+            {"model": "gemini-2.5-flash", "timeout": 90, "max_tokens": 20000},
+            {"model": "gemini-2.5-flash", "timeout": 180, "max_tokens": 24000},
+            {"model": "gemini-2.5-pro", "timeout": 300, "max_tokens": 65535}
         ]
 
         model_names = [m["model"] for m in self.models]

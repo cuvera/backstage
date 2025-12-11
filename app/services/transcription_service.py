@@ -61,8 +61,7 @@ class TranscriptionService:
             segments.append({
                 "segment_id": idx,
                 "start": self._ms_to_mmss(seg["start"]),
-                "end": self._ms_to_mmss(seg["end"]),
-                "label": seg["speaker_name"]
+                "end": self._ms_to_mmss(seg["end"])
             })
 
         logger.info(f"[TranscriptionService] Generated {len(segments)} segments from speaker timeframes")
@@ -95,7 +94,7 @@ class TranscriptionService:
             List of chunk dictionaries
         """
         logger.info(f"[TranscriptionService] Chunking audio for {platform} platform")
-        
+
         if platform.lower() == "offline":
             # Simple time-based chunking for offline
             chunks = chunk_audio_file(
@@ -105,6 +104,9 @@ class TranscriptionService:
                 output_dir=output_dir
             )
         else:
+            overlap_seconds = 0.0
+            logger.info("[TranscriptionService] Overlap disabled for online meeting (using speaker boundaries)")
+
             # Speaker-based chunking for online
             speaker_timeframes = meeting_metadata.get("speaker_timeframes", [])
             
@@ -219,7 +221,16 @@ class TranscriptionService:
                     "file_path": chunk.get("file_path")
                 }
                 results.append(result)
-                logger.info(f"[TranscriptionService] Completed transcription for chunk {chunk.get('chunk_id')}")
+
+                # Check for segment count mismatch
+                segments_sent = len(chunk.get("segments", []))
+                segments_returned = len(result.get("transcriptions", []))
+
+                if segments_sent != segments_returned:
+                    logger.warning(f"[TranscriptionService] Chunk {chunk.get('chunk_id')} mismatch: "
+                                 f"sent {segments_sent} segments but received {segments_returned} transcriptions")
+                else:
+                    logger.info(f"[TranscriptionService] Completed transcription for chunk {chunk.get('chunk_id')}")
             except Exception as e:
                 logger.error(f"[TranscriptionService] Failed to transcribe chunk {chunk.get('chunk_id')}: {e}")
                 # Add empty result to maintain order
@@ -408,7 +419,7 @@ class TranscriptionService:
 
         # Sort by source_chunk first (ascending), then by segment_id within chunk
         all_segments.sort(key=lambda x: (x.get("source_chunk", 0), x.get("segment_id", 0)))
-        
+
         # Add speaker mapping if available
         if meeting_metadata and meeting_metadata.get("speaker_timeframes"):
             all_segments = self._map_speakers_to_segments(all_segments, meeting_metadata)
@@ -435,7 +446,7 @@ class TranscriptionService:
         meeting_metadata: Dict,
         platform: str = "online",
         chunk_duration_minutes: float = 10.0,
-        overlap_seconds: float = 5.0,
+        overlap_seconds: float = 0.0,
         output_dir: str = './chunks/',
         models: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
