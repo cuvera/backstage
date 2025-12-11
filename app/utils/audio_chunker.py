@@ -346,6 +346,9 @@ class AudioChunker:
             # Get audio duration using ffprobe (no memory loading)
             total_duration_seconds = self._get_audio_duration_ffprobe(input_file_path)
 
+            logger.info(f"DEBUG: Audio file: {input_file_path}")
+            logger.info(f"DEBUG: Detected duration: {total_duration_seconds} seconds")
+
             # Group segments by target duration
             grouped_segments = group_segments_by_duration(segments, self.chunk_duration_minutes)
 
@@ -382,7 +385,22 @@ class AudioChunker:
                     group_start_seconds,
                     chunk_duration
                 )
-                
+
+                # Convert segments to relative timestamps (relative to chunk start)
+                relative_segments = []
+                for seg in segment_group:
+                    seg_start_seconds = parse_timestamp(seg['start'])
+                    seg_end_seconds = parse_timestamp(seg['end'])
+
+                    # Convert to relative timestamps
+                    relative_start = seg_start_seconds - group_start_seconds
+                    relative_end = seg_end_seconds - group_start_seconds
+
+                    relative_segment = seg.copy()
+                    relative_segment['start'] = seconds_to_timestamp(relative_start)
+                    relative_segment['end'] = seconds_to_timestamp(relative_end)
+                    relative_segments.append(relative_segment)
+
                 # Store chunk information
                 chunk_info = {
                     "chunk_id": chunk_index,
@@ -391,7 +409,7 @@ class AudioChunker:
                     "duration_seconds": group_end_seconds - group_start_seconds,
                     "file_path": chunk_path,
                     "file_size_bytes": os.path.getsize(chunk_path),
-                    "segments": segment_group
+                    "segments": relative_segments
                 }
                 chunks.append(chunk_info)
                 

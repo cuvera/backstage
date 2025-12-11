@@ -127,6 +127,7 @@ class TranscriptionService:
                 )
         
         logger.info(f"[TranscriptionService] Generated {len(chunks)} audio chunks")
+        # print(chunks)
         return chunks
     
     async def _transcribe_chunk_with_semaphore(
@@ -180,6 +181,10 @@ class TranscriptionService:
         
         # Create all tasks
         tasks = []
+
+        # start_time = chunks[0].get("start_time", "")
+        # end_time = chunks[-1].get("end_time", "")
+
         for chunk in chunks:
             # Replace placeholders in prompt
             prompt = base_prompt
@@ -187,6 +192,11 @@ class TranscriptionService:
             prompt = prompt.replace("{{end}}", chunk.get("end_time", ""))
             prompt = prompt.replace("{{segments}}", json.dumps(chunk.get("segments", [])))
             
+            # print chunk dictionary
+            print(chunks)
+
+            print(prompt)
+
             # Create task with semaphore control
             task = asyncio.create_task(
                 self._transcribe_chunk_with_semaphore(prompt, chunk["file_path"], models)
@@ -353,18 +363,14 @@ class TranscriptionService:
             
             transcriptions = result.get("transcriptions", [])
             for transcription in transcriptions:
-                # Convert to absolute timeline
+                # Convert relative timestamps to absolute timeline
                 segment_start_seconds = self._time_to_seconds(transcription.get("start", "00:00"))
                 segment_end_seconds = self._time_to_seconds(transcription.get("end", "00:00"))
 
-                # With segemented (online meeting) metadata, start and end are already absolute 
-                if meeting_metadata and meeting_metadata.get("speaker_timeframes"):
-                    absolute_start =  segment_start_seconds
-                    absolute_end = segment_end_seconds
-                else:
-                    absolute_start = chunk_start_seconds + segment_start_seconds
-                    absolute_end = chunk_start_seconds + segment_end_seconds
-                
+                # All transcriptions now come with relative timestamps, convert to absolute
+                absolute_start = chunk_start_seconds + segment_start_seconds
+                absolute_end = chunk_start_seconds + segment_end_seconds
+
                 # Update start/end with absolute values
                 transcription["start"] = self._seconds_to_time(absolute_start)
                 transcription["end"] = self._seconds_to_time(absolute_end)

@@ -1,13 +1,18 @@
 TRANSCRIPTION_AND_SENTIMENT_ANALYSIS_PROMPT=""""""
 
-TRANSCRIPTION_AND_SENTIMENT_ANALYSIS_PROMPT_ONLINE = """Transcribe the following audio file and provide accurate, verbatim transcription for each segment. The audio starts from {{start}} and ends at {{end}}.
+TRANSCRIPTION_AND_SENTIMENT_ANALYSIS_PROMPT_ONLINE = """Transcribe the following audio file and provide accurate, verbatim transcription for each segment.
+
+IMPORTANT CONTEXT:
+- This audio chunk represents the time range {{start}} to {{end}} in the full meeting
+- The audio you're receiving starts at 00:00 (beginning of this chunk)
+- All timestamps in the segments below are RELATIVE to the start of this audio chunk (00:00)
 
 TIME SEGMENTS TO TRANSCRIBE:
 {{segments}}
 
 TRANSCRIPTION REQUIREMENTS:
 - You MUST transcribe each segment listed above
-- Use the EXACT segment_id, start, and end times provided
+- Use the EXACT segment_id, start, and end times provided (they are relative to the audio chunk start)
 - Do NOT merge or skip segments, even if they overlap
 - Use proper punctuation, capitalization, and grammar
 - Do not summarize or paraphrase - provide exact words spoken
