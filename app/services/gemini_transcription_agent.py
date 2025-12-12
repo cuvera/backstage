@@ -256,18 +256,17 @@ class GeminiTranscriptionAgent:
             return result
 
         except json.JSONDecodeError as e:
-            # If truncation caused malformed JSON, raise TruncationError for retry
-            if is_truncated:
-                logger.error(f"[Gemini Agent] Response from {model} truncated and malformed JSON: {e}")
-                logger.error(f"Response content length: {len(response_content)}")
-                logger.error(f"Last 500 chars: {response_content[-500:]}")
-                raise TruncationError(f"Response truncated and malformed from {model}: {e}")
-
-            # Non-truncation JSON errors are non-retryable
+            # JSON parse errors are retryable - try fallback models
             logger.error(f"[Gemini Agent] Failed to parse response from {model} as JSON: {e}")
             logger.error(f"Response content length: {len(response_content)}")
             logger.error(f"Last 500 chars: {response_content[-500:]}")
-            raise TranscriptionAgentError(f"Malformed JSON response from {model}: {e}")
+
+            if is_truncated:
+                logger.error(f"[Gemini Agent] Response was truncated (MAX_TOKENS)")
+                raise TruncationError(f"Response truncated and malformed from {model}: {e}")
+            else:
+                # Malformed JSON without truncation - retryable for fallback
+                raise EmptyResponseError(f"Malformed JSON response from {model}: {e}")
 
     def _format_to_segments(self, raw_result: Dict[str, Any]) -> Dict[str, Any]:
         """
