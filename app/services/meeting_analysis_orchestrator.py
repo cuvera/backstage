@@ -5,12 +5,14 @@ from typing import Dict, Any
 import time
 from datetime import datetime
 import shutil
+from pathlib import Path
 
 from app.schemas.meeting_analysis import MeetingAnalysis
 from app.services.transcription_service import TranscriptionService
 from app.utils.audio_merger import merge_wav_files_from_s3, AudioMergerError
 from app.services.meeting_analysis_service import MeetingAnalysisService
 from app.repository import MeetingMetadataRepository
+from app.repository.transcription_v1_repository import TranscriptionV1Repository
 from app.utils.s3_client import download_s3_file
 from app.core.config import settings
 from app.services.agents import TranscriptionAgent, CallAnalysisAgent
@@ -34,9 +36,29 @@ class MeetingAlreadyProcessedException(Exception):
 
 class MeetingAnalysisOrchestrator:
     """Main service for orchestrating meeting processing pipeline."""
-    
+
     def __init__(self):
         self.meeting_metadata_repo = None  # Will be initialized when needed
+        self._ensure_temp_directory()
+
+    def _ensure_temp_directory(self) -> None:
+        """Ensure temp directory exists and has sufficient space."""
+        temp_dir = Path(settings.TEMP_AUDIO_DIR)
+
+        # Create directory if it doesn't exist
+        temp_dir.mkdir(parents=True, exist_ok=True)
+
+        # Check available disk space
+        stat = shutil.disk_usage(temp_dir)
+        free_gb = stat.free / (1024 ** 3)
+
+        if free_gb < settings.MIN_FREE_DISK_SPACE_GB:
+            logger.warning(
+                f"Low disk space in temp directory: {free_gb:.2f}GB free, "
+                f"minimum required: {settings.MIN_FREE_DISK_SPACE_GB}GB"
+            )
+
+        logger.info(f"Temp directory initialized: {temp_dir} ({free_gb:.2f}GB free)")
     
     async def analyze_meeting(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -107,12 +129,14 @@ class MeetingAnalysisOrchestrator:
             logger.info(f"Step 0 completed in {step_duration_ms}ms - meeting_id={meeting_id}")
 
             #################################################
-            # Step 1: Prepare audio file
+            # Step 1: Transcription with TranscriptionService v1
             #################################################
             step_start_time = time.time()
             logger.info(f"Step 1: Starting transcription process - meeting_id={meeting_id}")
-            transcription_service = TranscriptionService()
-            transcription = await transcription_service.get_transcription(meeting_id, tenant_id)
+
+            # Check if transcription v1 already exists
+            transcription_v1_repo = await TranscriptionV1Repository.from_default()
+            transcription = await transcription_v1_repo.get_transcription(meeting_id, tenant_id)
 
             if not transcription:
                 logger.info(f"Step 1.1: No existing transcription found, preparing audio file - meeting_id={meeting_id}")
@@ -123,17 +147,36 @@ class MeetingAnalysisOrchestrator:
                 if not file_url:
                     raise MeetingAnalysisOrchestratorError("Failed to prepare audio file")
 
-                # Step 1.2: Transcription with TranscriptionAgent
-                logger.info(f"Step 1.2: Starting audio transcription - meeting_id={meeting_id}")
-                transcription = await transcription_service.save_transcription(
+                # Step 1.2: Transcription with new TranscriptionService
+                logger.info(f"Step 1.2: Starting audio transcription with Gemini - meeting_id={meeting_id}")
+                transcription_service = TranscriptionService(max_concurrent=5)
+
+                transcription_result = await transcription_service.transcribe_meeting(
                     audio_file_path=file_url,
-                    meeting_id=meeting_id,
-                    tenant_id=tenant_id,
                     meeting_metadata=meeting_metadata,
+                    platform=platform,  # 'google' or 'offline'
+                    chunk_duration_minutes=10.0,
+                    overlap_seconds=5.0,
+                    output_dir=temp_directory
                 )
 
+                # Step 1.3: Save transcription v1 to database
+                logger.info(f"Step 1.3: Saving transcription v1 to database - meeting_id={meeting_id}")
+                save_result = await transcription_v1_repo.save_transcription(
+                    meeting_id=meeting_id,
+                    tenant_id=tenant_id,
+                    transcription_result=transcription_result
+                )
+                logger.info(
+                    f"Saved transcription v1: {save_result['total_segments']} segments, "
+                    f"{save_result['total_speakers']} speakers - meeting_id={meeting_id}"
+                )
+
+                # Get the saved transcription for downstream processing
+                transcription = await transcription_v1_repo.get_transcription(meeting_id, tenant_id)
+
             else:
-                logger.info(f"Step 1: Using existing transcription - meeting_id={meeting_id}")
+                logger.info(f"Step 1: Using existing transcription v1 - meeting_id={meeting_id}")
 
             step_duration_ms = round((time.time() - step_start_time) * 1000, 2)
             logger.info(f"Step 1 completed in {step_duration_ms}ms - meeting_id={meeting_id}")
@@ -153,17 +196,8 @@ class MeetingAnalysisOrchestrator:
             if not analysis_doc:
                 call_analysis_agent = CallAnalysisAgent()
 
-                # duration in seconds, last turn end time - first turn start time
-                if transcription["conversation"] and len(transcription["conversation"]) > 0:
-                    duration = transcription["conversation"][-1]["end_time"] - transcription["conversation"][0]["start_time"]
-                else:
-                    duration = 0
-
                 analysis = await call_analysis_agent.analyze(
-                        transcript_payload={
-                            **transcription,
-                            "duration_sec": duration
-                        },
+                        transcript_payload=transcription,
                         context={
                             "tenant_id": tenant_id,
                             "session_id": meeting_id,
@@ -245,11 +279,11 @@ class MeetingAnalysisOrchestrator:
             try:
                 if file_url and os.path.exists(file_url):
                     os.remove(file_url)
-                    cleaned_files.append(file_url)
+                    # cleaned_files.append(file_url)
                     logger.debug(f"Cleaned up temporary file: {file_url}")
 
                 if temp_directory and os.path.exists(temp_directory):
-                    shutil.rmtree(temp_directory)
+                    # shutil.rmtree(temp_directory)
                     cleaned_directories.append(temp_directory)
                     logger.debug(f"Cleaned up temporary directory: {temp_directory}")
                 
@@ -264,7 +298,7 @@ class MeetingAnalysisOrchestrator:
             if platform == "google":
                 if not self.meeting_metadata_repo:
                     self.meeting_metadata_repo = await MeetingMetadataRepository.from_default()
-                
+
                 await self.meeting_metadata_repo.update_meeting_status(meeting_id, platform, status)
                 logger.info(f"Updated meeting {meeting_id} status to {status} for platform {platform}")
             elif platform == "offline":
@@ -285,27 +319,62 @@ class MeetingAnalysisOrchestrator:
     async def _prepare_audio_file(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Prepare audio file for processing."""
         bucket = payload.get('bucket', settings.MEETING_BUCKET_NAME)
-        temp_dir = tempfile.mkdtemp(prefix="audio_merge_", suffix=datetime.now().strftime("_%Y%m%d_%H%M%S"))
+
+        # Use configured temp directory instead of system temp
+        temp_base_dir = Path(settings.TEMP_AUDIO_DIR)
+        temp_base_dir.mkdir(parents=True, exist_ok=True)
+
+        # Check disk space before creating temp directory
+        stat = shutil.disk_usage(temp_base_dir)
+        free_gb = stat.free / (1024 ** 3)
+
+        if free_gb < settings.MIN_FREE_DISK_SPACE_GB:
+            raise MeetingAnalysisOrchestratorError(
+                f"Insufficient disk space: {free_gb:.2f}GB free, "
+                f"minimum required: {settings.MIN_FREE_DISK_SPACE_GB}GB"
+            )
+
+        # Create meeting-specific temp directory
+        meeting_id = payload.get('_id')
+        temp_dir_name = f"audio_merge_{meeting_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        temp_dir = temp_base_dir / temp_dir_name
+        temp_dir.mkdir(parents=True, exist_ok=True)
+
+        logger.info(f"Created temp directory: {temp_dir} ({free_gb:.2f}GB free)")
         file_url = None
-        
+
         if not payload.get('fileUrl'):
             s3_folder_path = f"{payload.get('tenantId')}/{payload.get('platform')}/{payload.get('_id')}/"
-            output_s3_key = f"{payload.get('tenantId')}/{payload.get('platform')}/{payload.get('_id')}/meeting.wav"
+            output_s3_key = f"{payload.get('tenantId')}/{payload.get('platform')}/{payload.get('_id')}/meeting.m4a"
 
             merge_result = await merge_wav_files_from_s3(
                 s3_folder_path=s3_folder_path,
                 output_s3_key=output_s3_key,
                 bucket_name=bucket,
-                temp_dir=temp_dir
+                temp_dir=str(temp_dir)
             )
             file_url = merge_result['local_merged_file_path']
         else:
-            file_url = os.path.join(temp_dir, "merged_output.wav")
-            await download_s3_file(payload.get('fileUrl'), file_url, bucket)
+            # Preserve original file extension from S3 key
+            s3_file_key = payload.get('fileUrl')
+            original_extension = Path(s3_file_key).suffix or '.m4a'
+            file_url = str(temp_dir / f"merged_output{original_extension}")
+            await download_s3_file(s3_file_key, file_url, bucket)
+
+        # Validate file size
+        if os.path.exists(file_url):
+            file_size_mb = os.path.getsize(file_url) / (1024 ** 2)
+            logger.info(f"Audio file size: {file_size_mb:.2f}MB")
+
+            if file_size_mb > settings.MAX_AUDIO_FILE_SIZE_MB:
+                logger.warning(
+                    f"Audio file exceeds maximum size: {file_size_mb:.2f}MB > "
+                    f"{settings.MAX_AUDIO_FILE_SIZE_MB}MB"
+                )
 
         return {
             'local_merged_file_path': file_url,
-            'temp_directory': temp_dir
+            'temp_directory': str(temp_dir)
         }
 
     async def _send_meeting_completion_email(
@@ -380,10 +449,20 @@ class MeetingAnalysisOrchestrator:
                 organizer = attendees_list[0]
             
             # Calculate duration string
-            duration_sec = int(analysis.duration_sec)/1000 or 0
-            hours = int(duration_sec // 3600)
-            minutes = int((duration_sec % 3600) // 60)
-            duration_str = f"{hours} Hour {minutes} Minutes" if hours > 0 else f"{minutes} Minutes"
+            # Calculate duration string from HH:MM:SS format
+            duration_str = "0 Minutes"
+            if analysis.duration:
+                try:
+                    parts = analysis.duration.split(":")
+                    if len(parts) == 3:
+                        hours = int(parts[0])
+                        minutes = int(parts[1])
+                        duration_str = f"{hours} Hour {minutes} Minutes" if hours > 0 else f"{minutes} Minutes"
+                    elif len(parts) == 2:
+                        minutes = int(parts[0])
+                        duration_str = f"{minutes} Minutes"
+                except (ValueError, IndexError):
+                    pass
             
             # Send email notification
             send_email_notification(

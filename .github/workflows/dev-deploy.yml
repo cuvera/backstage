@@ -31,7 +31,7 @@ jobs:
           context: .
           push: true
           tags: |
-            ${{ secrets.DOCKER_REGISTRY_URL }}/cuvera-backstage:${{ github.sha }}
+            ${{ secrets.DOCKER_REGISTRY_URL }}/backstage:${{ github.sha }}
 
   deploy:
     needs: build
