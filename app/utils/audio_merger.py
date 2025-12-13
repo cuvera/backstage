@@ -2,14 +2,14 @@ import logging
 import os
 import tempfile
 import time
+import subprocess
+import json
 from typing import Dict, List, Optional, Any
 import asyncio
 from pathlib import Path
 
 import boto3
 from botocore.exceptions import ClientError, NoCredentialsError
-import audiofile
-import numpy as np
 import aiofiles
 from app.utils.s3_client import get_s3_client, download_s3_file, upload_to_s3
 
@@ -21,6 +21,133 @@ logger = logging.getLogger(__name__)
 class AudioMergerError(Exception):
     """Custom exception for audio merger operations."""
     pass
+
+
+def _get_audio_metadata_ffprobe(file_path: str) -> dict:
+    """
+    Get audio metadata using ffprobe without loading file into memory.
+
+    Args:
+        file_path: Path to the audio file
+
+    Returns:
+        Dictionary with duration and sample_rate
+
+    Raises:
+        AudioMergerError: If ffprobe fails
+    """
+    try:
+        result = subprocess.run([
+            'ffprobe', '-v', 'error',
+            '-show_entries', 'format=duration:stream=sample_rate',
+            '-of', 'json',
+            file_path
+        ], capture_output=True, text=True, check=True)
+
+        data = json.loads(result.stdout)
+
+        duration = float(data['format']['duration'])
+        # Get sample rate from first audio stream
+        sample_rate = 44100  # Default fallback
+        if 'streams' in data and len(data['streams']) > 0:
+            sample_rate = int(data['streams'][0].get('sample_rate', 44100))
+
+        return {'duration': duration, 'sample_rate': sample_rate}
+    except Exception as e:
+        raise AudioMergerError(f"Failed to get audio metadata: {e}")
+
+
+def _merge_audio_files_ffmpeg(
+    input_files: List[str],
+    output_dir: str,
+    output_name: str = "merged_output",
+    output_format: str = 'm4a'  # Default to M4A
+) -> str:
+    """
+    Merge audio files using ffmpeg (no memory loading).
+
+    Args:
+        input_files: List of input file paths (any audio format)
+        output_dir: Directory for output file
+        output_name: Output filename without extension
+        output_format: Output format ('m4a', 'wav', 'mp3', etc.). Default: 'm4a'
+
+    Returns:
+        Path to merged output file
+
+    Raises:
+        AudioMergerError: If merge fails
+    """
+    if not input_files:
+        raise AudioMergerError("No input files provided for merging")
+
+    # Normalize format (remove dot if provided)
+    output_format = output_format.lstrip('.')
+
+    # Build output path with specified format
+    output_path = os.path.join(output_dir, f"{output_name}.{output_format}")
+
+    # Create concat file list
+    concat_list_path = output_path + '.concat.txt'
+    with open(concat_list_path, 'w') as f:
+        for file_path in input_files:
+            escaped_path = file_path.replace("'", "'\\''")
+            f.write(f"file '{escaped_path}'\n")
+
+    try:
+        # Check if we can use codec copy (all inputs match output format)
+        input_formats = [Path(f).suffix.lower().lstrip('.') for f in input_files]
+        can_copy = all(fmt == output_format for fmt in input_formats)
+
+        if can_copy:
+            # All inputs match output format: codec copy (fast, no re-encoding)
+            logger.info(f"All inputs are {output_format}, using codec copy")
+            subprocess.run([
+                'ffmpeg',
+                '-f', 'concat',
+                '-safe', '0',
+                '-i', concat_list_path,
+                '-c', 'copy',
+                '-y',
+                output_path
+            ], check=True, capture_output=True)
+        else:
+            # Need to re-encode to output format
+            logger.info(f"Converting inputs to {output_format}")
+
+            # Choose encoder based on output format
+            if output_format in ['m4a', 'mp4', 'aac']:
+                codec_args = ['-c:a', 'aac', '-b:a', '128k']
+            elif output_format == 'mp3':
+                codec_args = ['-c:a', 'libmp3lame', '-b:a', '128k']
+            elif output_format == 'wav':
+                codec_args = ['-c:a', 'pcm_s16le']
+            elif output_format in ['flac']:
+                codec_args = ['-c:a', 'flac']
+            else:
+                # Default to AAC for unknown formats
+                logger.warning(f"Unknown format '{output_format}', defaulting to AAC")
+                codec_args = ['-c:a', 'aac', '-b:a', '128k']
+
+            subprocess.run([
+                'ffmpeg',
+                '-f', 'concat',
+                '-safe', '0',
+                '-i', concat_list_path,
+                *codec_args,
+                '-y',
+                output_path
+            ], check=True, capture_output=True)
+
+        logger.info(f"Merged audio file created: {output_path}")
+        return output_path
+
+    except subprocess.CalledProcessError as e:
+        stderr_output = e.stderr.decode(errors='replace') if e.stderr else str(e)
+        raise AudioMergerError(f"ffmpeg merge failed: {stderr_output}")
+    finally:
+        if os.path.exists(concat_list_path):
+            os.remove(concat_list_path)
 
 
 async def merge_wav_files_from_s3(
@@ -72,18 +199,20 @@ async def merge_wav_files_from_s3(
         meeting_file = next((file for file in wav_files if Path(file).name == "meeting.wav"), None)
         if meeting_file:
             logger.info("Pre-merged meeting file found, downloading directly")
-            file_path = os.path.join(temp_dir, "merged_output.wav")
+            # Get format from source file, default to m4a
+            source_ext = Path(meeting_file).suffix.lower().lstrip('.')
+            output_format = source_ext if source_ext else 'm4a'
+            file_path = os.path.join(temp_dir, f"merged_output.{output_format}")
             await download_s3_file(meeting_file, file_path, bucket)
 
             logger.debug("Meeting file downloaded successfully")
             file_size = os.path.getsize(file_path)
 
-            # Calculate metadata
-            signal, sampling_rate = audiofile.read(file_path)
-            duration_seconds = len(signal) / sampling_rate
+            # Calculate metadata using ffprobe (no memory loading)
+            metadata = _get_audio_metadata_ffprobe(file_path)
+            duration_seconds = metadata['duration']
 
             result = {
-                "file": file_path,
                 "local_merged_file_path": file_path,
                 "merged_file_s3_key": output_s3_key,
                 "total_files_merged": len(wav_files),
@@ -92,7 +221,7 @@ async def merge_wav_files_from_s3(
                 "temp_directory": temp_dir,
                 "bucket_name": bucket
             }
-            
+
             processing_time_ms = round((time.time() - merge_start_time) * 1000, 2)
             logger.info(f"Audio processing completed in {processing_time_ms}ms")
             return result
@@ -120,16 +249,17 @@ async def merge_wav_files_from_s3(
                 raise AudioMergerError(f"Failed to download files: {failed_files}")
             
             logger.info(f"All {len(wav_files)} audio files downloaded successfully")
-            
-            # Validate and merge audio files
-            merged_audio, sample_rate = await merge_local_audio_files(local_files)
-            
-            # Export merged audio to temporary file
-            merged_file_path = os.path.join(temp_dir, "merged_output.wav")
-            audiofile.write(merged_file_path, merged_audio, sample_rate)
-        
+
+            # Merge audio files using ffmpeg (no memory loading, outputs M4A by default)
+            merged_file_path = _merge_audio_files_ffmpeg(
+                local_files,
+                temp_dir,
+                output_name="merged_output",
+                output_format='m4a'  # Default to M4A for efficiency
+            )
+
             logger.info(f"Merged audio exported to: {merged_file_path}")
-        
+
             # Upload merged file to S3
             if output_s3_key:
                 logger.debug("Uploading merged audio file to S3")
@@ -137,10 +267,11 @@ async def merge_wav_files_from_s3(
                 if not upload_success:
                     logger.error("Failed to upload merged file to S3")
                     raise AudioMergerError(f"Failed to upload merged file to s3://{bucket}/{output_s3_key}")
-        
-            # Calculate metadata
+
+            # Calculate metadata using ffprobe (no memory loading)
             file_size = os.path.getsize(merged_file_path)
-            duration_seconds = len(merged_audio) / sample_rate
+            metadata = _get_audio_metadata_ffprobe(merged_file_path)
+            duration_seconds = metadata['duration']
         
             result = {
                 "local_merged_file_path": merged_file_path,
@@ -163,12 +294,13 @@ async def merge_wav_files_from_s3(
         cleanup_start_time = time.time()
         cleaned_files_count = 0
         
-        # Cleanup temporary files (except merged_output.wav which orchestrator handles)
+        # Cleanup temporary files (except merged_output.* which orchestrator handles)
         if temp_dir and os.path.exists(temp_dir):
             import shutil
             try:
                 for file in os.listdir(temp_dir):
-                    if file != "merged_output.wav":
+                    # Keep merged output file (any extension: .m4a, .wav, etc.)
+                    if not file.startswith("merged_output."):
                         file_path = os.path.join(temp_dir, file)
                         if os.path.isfile(file_path):
                             os.remove(file_path)
@@ -231,64 +363,6 @@ async def list_wav_files_in_s3_folder(
         logger.error(f"Failed to list S3 files: {str(e)}", exc_info=True)
         raise AudioMergerError(f"Failed to list S3 files: {str(e)}") from e
 
-async def merge_local_audio_files(file_paths: List[str]) -> tuple[np.ndarray, int]:
-    """
-    Merge multiple local audio files into a single audio array.
-    
-    Args:
-        file_paths: List of local audio file paths
-    
-    Returns:
-        Tuple of (merged_audio_data, sample_rate)
-    """
-    if not file_paths:
-        logger.info("No files provided for merging")
-    
-    logger.info(f"Starting local audio file merge - {len(file_paths)} files")
-    merge_start_time = time.time()
-    
-    merged_audio = None
-    sample_rate = None
-    
-    for i, file_path in enumerate(file_paths):
-        try:
-            # Validate file exists
-            if not os.path.exists(file_path):
-                raise AudioMergerError(f"File not found: {file_path}")
-            
-            # Load audio file
-            signal, sr = audiofile.read(file_path)
-            
-            # Convert to mono if stereo
-            if signal.ndim > 1:
-                signal = np.mean(signal, axis=1)
-            
-            # Set sample rate from first file
-            if sample_rate is None:
-                sample_rate = sr
-            elif sr != sample_rate:
-                # Resample if needed (basic implementation)
-                logger.warning(f"Sample rate mismatch: {sr} vs {sample_rate}. Using first file's rate.")
-            
-            logger.debug(f"Processed audio file {i+1}/{len(file_paths)}")
-            
-            # Merge with previous audio
-            if merged_audio is None:
-                merged_audio = signal
-            else:
-                merged_audio = np.concatenate([merged_audio, signal])
-                
-        except Exception as e:
-            logger.error(f"Failed to process audio file {file_path}: {str(e)}", exc_info=True)
-            raise AudioMergerError(f"Failed to process audio file {file_path}: {str(e)}") from e
-    
-    if merged_audio is None:
-        logger.info("No audio content was merged")
-    
-    processing_time_ms = round((time.time() - merge_start_time) * 1000, 2)
-    total_duration = round(len(merged_audio) / sample_rate, 2)
-    logger.info(f"Local audio merge completed in {processing_time_ms}ms - {len(file_paths)} files, {total_duration}s total duration")
-    return merged_audio, sample_rate
 
 
 # if __name__ == "__main__":

@@ -127,12 +127,20 @@ async def root():
     #     "bucket": "cuverademo",
     #     "fileUrl": "689ddc0411e4209395942bee/google/3leetlec1vouor0iis1h7j0ig1/Cuvera Bot-2025-11-11T09:36:47.739Z.wav"
     # }
+    # payload = {
+    #     "_id": "691300ec64082d8a17bf85bb",
+    #     "tenantId": "689ddc0411e4209395942bee",
+    #     "platform": "google",
+    #     "bucket": "recordings",
+    #     "fileUrl": "689ddc0411e4209395942bee/google/3leetlec1vouor0iis1h7j0ig1/Cuvera Bot-2025-11-11T09:36:47.739Z.wav"
+    # }
+
     payload = {
-        "_id": "691300ec64082d8a17bf85bb",
+        "_id": "692abe3447856a0242fca4a9",
         "tenantId": "689ddc0411e4209395942bee",
         "platform": "google",
-        "bucket": "recordings",
-        "fileUrl": "689ddc0411e4209395942bee/google/3leetlec1vouor0iis1h7j0ig1/Cuvera Bot-2025-11-11T09:36:47.739Z.wav"
+        "bucket": "cuverademo",
+        "fileUrl": "689ddc0411e4209395942bee/google/d1160425-24f3-4889-b69f-a94a5cb17f78/Gro Genie Bot-2025-11-29.m4a"
     }
 
     payload_dict = json.loads(json.dumps(payload))

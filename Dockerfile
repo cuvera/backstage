@@ -18,10 +18,19 @@ RUN pip install --user -r requirements.txt
 FROM python:3.11-slim AS production
 
 # Install runtime dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    ffmpeg \
+    mediainfo \
+    && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user (Debian/Ubuntu syntax)
 RUN groupadd -r appuser && useradd -r -g appuser appuser
+
+# Create data directory with proper permissions
+RUN mkdir -p /data && \
+    chown -R appuser:appuser /data && \
+    chmod 1777 /data
 
 WORKDIR /app
 
