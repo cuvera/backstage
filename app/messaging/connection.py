@@ -39,11 +39,18 @@ async def get_channel() -> AbstractRobustChannel:
 
         if not _connection or _connection.is_closed:
             logger.info("Connecting to RabbitMQ at %s", settings.RABBITMQ_URL)
-            _connection = await aio_pika.connect_robust(settings.RABBITMQ_URL)
+            _connection = await aio_pika.connect_robust(
+                settings.RABBITMQ_URL,
+                timeout=settings.RABBITMQ_CONNECTION_TIMEOUT,
+                heartbeat=settings.RABBITMQ_HEARTBEAT,
+                client_properties={
+                    "connection_name": "backstage-shared-connection"
+                }
+            )
 
         logger.info("Opening RabbitMQ channel")
         _channel = await _connection.channel()
-        await _channel.set_qos(prefetch_count=10)
+        await _channel.set_qos(prefetch_count=settings.RABBITMQ_PREFETCH_COUNT)
         return _channel
 
 
