@@ -85,7 +85,7 @@ class TranscriptionV1Repository(BaseRepository):
                     start=segment_data.get("start", "00:00"),
                     end=segment_data.get("end", "00:00"),
                     transcription=segment_data.get("transcription", ""),
-                    sentiment=SentimentLabel(segment_data.get("sentiment", "neutral")),
+                    sentiment=SentimentLabel(segment_data.get("sentiment", "neutral").lower()),
                     source_chunk=segment_data.get("source_chunk", 0),
                     chunk_start_time=segment_data.get("chunk_start_time", "00:00"),
                     chunk_end_time=segment_data.get("chunk_end_time", "00:00"),
@@ -99,7 +99,7 @@ class TranscriptionV1Repository(BaseRepository):
                     speaker=speaker_data.get("speaker", "Unknown"),
                     segments=speaker_data.get("segments", 0),
                     duration=speaker_data.get("duration", "00:00"),
-                    sentiment=SentimentLabel(speaker_data.get("sentiment", "neutral"))
+                    sentiment=SentimentLabel(speaker_data.get("sentiment", "neutral").lower())
                 ))
             
             # Convert metadata
