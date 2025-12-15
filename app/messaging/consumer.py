@@ -21,9 +21,9 @@ class RabbitMQConsumerManager:
             logger.info(f"Connecting to RabbitMQ for queue: {queue_name}")
             connection = await aio_pika.connect_robust(
                 RABBITMQ_URL,
-                timeout=60,
-                heartbeat=60,  # Send heartbeat every 60 seconds
-                blocked_connection_timeout=300,  # 5 minutes for blocked connections
+                timeout=settings.RABBITMQ_CONNECTION_TIMEOUT,
+                heartbeat=settings.RABBITMQ_HEARTBEAT,
+                blocked_connection_timeout=settings.RABBITMQ_CONNECTION_TIMEOUT,
                 client_properties={
                     "connection_name": f"backstage-consumer-{queue_name}"
                 }
@@ -32,7 +32,7 @@ class RabbitMQConsumerManager:
 
             channel = await connection.channel()
             # Reduce prefetch to avoid holding too many messages during long processing
-            await channel.set_qos(prefetch_count=1)
+            await channel.set_qos(prefetch_count=settings.RABBITMQ_PREFETCH_COUNT)
 
             # Try to declare queue, if it fails due to precondition, use passive mode
             try:
