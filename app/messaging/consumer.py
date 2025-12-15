@@ -5,6 +5,7 @@ from typing import Callable
 from app.core.config import settings
 from app.messaging.handlers.settings import QUEUE_CONFIG
 from app.messaging.handlers.handler import handler
+from app.messaging.connection import get_channel, close
 
 logger = logging.getLogger(__name__)
 
@@ -13,26 +14,16 @@ RABBITMQ_URL = settings.RABBITMQ_URL
 class RabbitMQConsumerManager:
     def __init__(self):
         self._tasks = []
-        self._connections = []
 
     async def _consume_queue(self, queue_name: str, handler: Callable, dlq: str = None):
-        connection = None
         try:
-            logger.info(f"Connecting to RabbitMQ for queue: {queue_name}")
-            connection = await aio_pika.connect_robust(
-                RABBITMQ_URL,
-                timeout=60,
-                heartbeat=60,  # Send heartbeat every 60 seconds
-                blocked_connection_timeout=300,  # 5 minutes for blocked connections
-                client_properties={
-                    "connection_name": f"backstage-consumer-{queue_name}"
-                }
-            )
-            self._connections.append(connection)
+            logger.info(f"Setting up consumer for queue: {queue_name}")
 
-            channel = await connection.channel()
-            # Reduce prefetch to avoid holding too many messages during long processing
-            await channel.set_qos(prefetch_count=1)
+            # Use shared connection and channel
+            channel = await get_channel()
+
+            # Set QoS for this consumer
+            await channel.set_qos(prefetch_count=settings.RABBITMQ_PREFETCH_COUNT)
 
             # Try to declare queue, if it fails due to precondition, use passive mode
             try:
@@ -88,12 +79,12 @@ class RabbitMQConsumerManager:
 
     async def stop(self):
         logger.info("Shutting down RabbitMQ consumers...")
-        
+
         # Cancel all consumer tasks
         for task in self._tasks:
             if not task.done():
                 task.cancel()
-        
+
         # Wait for tasks to complete with timeout
         if self._tasks:
             try:
@@ -103,13 +94,8 @@ class RabbitMQConsumerManager:
                 )
             except asyncio.TimeoutError:
                 logger.warning("Consumer tasks did not shut down within timeout")
-        
-        # Close connections
-        for conn in self._connections:
-            try:
-                if not conn.is_closed:
-                    await conn.close()
-            except Exception as e:
-                logger.debug(f"Error closing connection during shutdown: {e}")
-        
+
+        # Close shared connection
+        await close()
+
         logger.info("RabbitMQ consumers stopped.")
