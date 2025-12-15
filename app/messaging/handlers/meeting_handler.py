@@ -6,6 +6,7 @@ from typing import Any, Dict
 from aio_pika.abc import AbstractIncomingMessage
 from aiormq.exceptions import ChannelInvalidStateError
 
+from app.core.config import settings
 from app.services.meeting_analysis_orchestrator import (
     MeetingAnalysisOrchestrator,
     MeetingAnalysisOrchestratorError,
@@ -13,6 +14,9 @@ from app.services.meeting_analysis_orchestrator import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Global semaphore to limit concurrent meeting processing
+_processing_semaphore = asyncio.Semaphore(settings.MAX_CONCURRENT_MEETINGS)
 
 
 async def _safe_ack(message: AbstractIncomingMessage) -> bool:
@@ -49,39 +53,48 @@ async def _process_meeting_async(payload: Dict[str, Any]) -> None:
     """
     Process meeting asynchronously without holding the message.
     This prevents timeout issues by allowing early acknowledgment.
+
+    Uses a semaphore to limit concurrent processing and prevent system overload.
     """
     processing_service = None
-    try:
-        meeting_id = payload.get('_id', 'unknown')
-        logger.info(f"Starting background processing for meeting {meeting_id}")
-        
-        # Initialize processing service
-        processing_service = MeetingAnalysisOrchestrator()
-        
-        # Process the meeting
-        result = await processing_service.analyze_meeting(payload)
-        
-        if result:
-            logger.info(f"Background processing completed successfully for meeting {meeting_id}")
-        else:
-            logger.error(f"Background processing failed for meeting: {meeting_id}")
-            
-    except MeetingAlreadyProcessedException as e:
-        logger.info(f"Meeting already processed or being processed: {e}")
-        
-    except MeetingAnalysisOrchestratorError as e:
-        logger.error(f"Meeting processing service error: {e}")
-        
-    except Exception as e:
-        logger.error(f"Unexpected error in background meeting processing: {e}", exc_info=True)
-    
-    finally:
-        # Cleanup processing service if it was created
-        if processing_service and hasattr(processing_service, 'transcription_service'):
-            try:
-                await processing_service.transcription_service.cleanup()
-            except Exception as cleanup_error:
-                logger.warning(f"Failed to cleanup processing service: {cleanup_error}")
+
+    # Acquire semaphore before processing to limit concurrency
+    async with _processing_semaphore:
+        try:
+            meeting_id = payload.get('_id', 'unknown')
+            concurrent_count = settings.MAX_CONCURRENT_MEETINGS - _processing_semaphore._value
+            logger.info(
+                f"Starting background processing for meeting {meeting_id} "
+                f"(concurrent: {concurrent_count}/{settings.MAX_CONCURRENT_MEETINGS})"
+            )
+
+            # Initialize processing service
+            processing_service = MeetingAnalysisOrchestrator()
+
+            # Process the meeting
+            result = await processing_service.analyze_meeting(payload)
+
+            if result:
+                logger.info(f"Background processing completed successfully for meeting {meeting_id}")
+            else:
+                logger.error(f"Background processing failed for meeting: {meeting_id}")
+
+        except MeetingAlreadyProcessedException as e:
+            logger.info(f"Meeting already processed or being processed: {e}")
+
+        except MeetingAnalysisOrchestratorError as e:
+            logger.error(f"Meeting processing service error: {e}")
+
+        except Exception as e:
+            logger.error(f"Unexpected error in background meeting processing: {e}", exc_info=True)
+
+        finally:
+            # Cleanup processing service if it was created
+            if processing_service and hasattr(processing_service, 'transcription_service'):
+                try:
+                    await processing_service.transcription_service.cleanup()
+                except Exception as cleanup_error:
+                    logger.warning(f"Failed to cleanup processing service: {cleanup_error}")
 
 
 async def meeting_handler(message: AbstractIncomingMessage) -> None:
