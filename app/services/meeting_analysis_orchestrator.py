@@ -308,11 +308,11 @@ class MeetingAnalysisOrchestrator:
             try:
                 if file_url and os.path.exists(file_url):
                     os.remove(file_url)
-                    # cleaned_files.append(file_url)
+                    cleaned_files.append(file_url)
                     logger.debug(f"Cleaned up temporary file: {file_url}")
 
                 if temp_directory and os.path.exists(temp_directory):
-                    # shutil.rmtree(temp_directory)
+                    shutil.rmtree(temp_directory)
                     cleaned_directories.append(temp_directory)
                     logger.debug(f"Cleaned up temporary directory: {temp_directory}")
                 
