@@ -251,7 +251,7 @@ class TranscriptionService:
         if len(parts) == 2:
             # MM:SS format from Gemini
             minutes = int(parts[0])
-            seconds = int(parts[1])
+            seconds = int(float(parts[1]))
             return minutes * 60 + seconds
         elif len(parts) == 3:
             # HH:MM:SS format (fallback)
