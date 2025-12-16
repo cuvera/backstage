@@ -244,7 +244,137 @@ class TranscriptionService:
         
         logger.info(f"[TranscriptionService] Completed parallel transcription of {len(results)} chunks")
         return results
-    
+
+    async def _transcribe_chunks_parallel_with_saving(
+        self,
+        chunks: List[Dict],
+        platform: str,
+        meeting_id: str,
+        tenant_id: str,
+        models: Optional[List[Dict[str, Any]]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Transcribe all chunks in parallel with semaphore limiting concurrency.
+        Saves each chunk to database immediately after successful transcription.
+
+        Args:
+            chunks: List of audio chunks
+            platform: "online" or "offline" for prompt selection
+            meeting_id: Meeting identifier for chunk persistence
+            tenant_id: Tenant identifier for chunk persistence
+            models: Optional list of model configs for fallback chain
+
+        Returns:
+            List of transcription results
+        """
+        from app.repository.transcription_chunk_repository import TranscriptionChunkRepository
+
+        logger.info(f"[TranscriptionService] Starting parallel transcription with incremental saving of {len(chunks)} chunks")
+
+        chunk_repo = await TranscriptionChunkRepository.from_default()
+
+        # Select prompt based on platform
+        if platform.lower() == "offline":
+            base_prompt = TRANSCRIPTION_AND_SENTIMENT_ANALYSIS_PROMPT_OFFLINE
+        else:
+            base_prompt = TRANSCRIPTION_AND_SENTIMENT_ANALYSIS_PROMPT_ONLINE
+
+        # Create all tasks
+        tasks = []
+
+        for chunk in chunks:
+            # Replace placeholders in prompt
+            prompt = base_prompt
+            prompt = prompt.replace("{{start}}", chunk.get("start_time", ""))
+            prompt = prompt.replace("{{end}}", chunk.get("end_time", ""))
+            prompt = prompt.replace("{{segments}}", json.dumps(chunk.get("segments", [])))
+
+            # Create task with semaphore control
+            task = asyncio.create_task(
+                self._transcribe_chunk_with_semaphore(prompt, chunk["file_path"], models)
+            )
+            tasks.append((task, chunk))
+
+        # Wait for all tasks to complete and save each one
+        results = []
+        for task, chunk in tasks:
+            chunk_id = chunk.get("chunk_id")
+
+            # Mark chunk as processing
+            try:
+                await chunk_repo.save_chunk(
+                    meeting_id=meeting_id,
+                    tenant_id=tenant_id,
+                    chunk_id=chunk_id,
+                    status="processing",
+                    chunk_info=chunk
+                )
+            except Exception as e:
+                logger.warning(f"[TranscriptionService] Failed to mark chunk {chunk_id} as processing: {e}")
+
+            try:
+                result = await task
+                result["chunk_info"] = {
+                    "chunk_id": chunk_id,
+                    "start_time": chunk.get("start_time"),
+                    "end_time": chunk.get("end_time"),
+                    "file_path": chunk.get("file_path")
+                }
+
+                # Check for segment count mismatch
+                segments_sent = len(chunk.get("segments", []))
+                segments_returned = len(result.get("transcriptions", []))
+
+                if segments_sent != segments_returned:
+                    logger.warning(f"[TranscriptionService] Chunk {chunk_id} mismatch: "
+                                 f"sent {segments_sent} segments but received {segments_returned} transcriptions")
+
+                # Save successful chunk to database
+                try:
+                    await chunk_repo.save_chunk(
+                        meeting_id=meeting_id,
+                        tenant_id=tenant_id,
+                        chunk_id=chunk_id,
+                        status="success",
+                        chunk_info=chunk,
+                        result=result
+                    )
+                    logger.info(f"[TranscriptionService] ✅ Chunk {chunk_id} transcribed and saved successfully")
+                except Exception as save_error:
+                    logger.error(f"[TranscriptionService] Failed to save chunk {chunk_id}: {save_error}")
+                    # Still add to results even if save fails
+
+                results.append(result)
+
+            except Exception as e:
+                logger.error(f"[TranscriptionService] Failed to transcribe chunk {chunk_id}: {e}")
+
+                # Save failed chunk to database
+                try:
+                    await chunk_repo.save_chunk(
+                        meeting_id=meeting_id,
+                        tenant_id=tenant_id,
+                        chunk_id=chunk_id,
+                        status="failed",
+                        chunk_info=chunk,
+                        error=str(e)
+                    )
+                    logger.info(f"[TranscriptionService] ❌ Chunk {chunk_id} marked as failed")
+                except Exception as save_error:
+                    logger.error(f"[TranscriptionService] Failed to save failed chunk {chunk_id}: {save_error}")
+
+                # Add empty result to maintain order
+                results.append({
+                    "transcriptions": [],
+                    "chunk_info": {
+                        "chunk_id": chunk_id,
+                        "error": str(e)
+                    }
+                })
+
+        logger.info(f"[TranscriptionService] Completed parallel transcription with saving of {len(results)} chunks")
+        return results
+
     def _time_to_seconds(self, time_str: str) -> float:
         """Convert MM:SS to seconds (Gemini format)"""
         parts = time_str.split(':')
@@ -444,18 +574,24 @@ class TranscriptionService:
         self,
         audio_file_path: str,
         meeting_metadata: Dict,
+        meeting_id: Optional[str] = None,
+        tenant_id: Optional[str] = None,
         platform: str = "online",
         chunk_duration_minutes: float = 10.0,
         overlap_seconds: float = 0.0,
         output_dir: str = './chunks/',
-        models: Optional[List[Dict[str, Any]]] = None
+        models: Optional[List[Dict[str, Any]]] = None,
+        enable_incremental_saving: bool = True
     ) -> Dict[str, Any]:
         """
-        Main method to transcribe a meeting with platform-specific chunking and parallel processing
+        Main method to transcribe a meeting with platform-specific chunking and parallel processing.
+        Supports incremental chunk saving for efficient retries.
 
         Args:
             audio_file_path: Path to the audio file
             meeting_metadata: Meeting metadata containing speaker_timeframes for online platform
+            meeting_id: Meeting identifier (required for incremental saving)
+            tenant_id: Tenant identifier (required for incremental saving)
             platform: "online" or "offline" - determines chunking strategy
             chunk_duration_minutes: Duration of each chunk in minutes
             overlap_seconds: Overlap between chunks in seconds
@@ -465,49 +601,104 @@ class TranscriptionService:
                         {"model": "gemini-2.0-flash-exp", "timeout": 180, "max_tokens": 20000},
                         {"model": "gemini-1.5-pro", "timeout": 300, "max_tokens": 65535}
                     ]
+            enable_incremental_saving: Enable saving chunks incrementally (default: True)
 
         Returns:
             Merged transcription result with metadata
         """
         logger.info(f"[TranscriptionService] Starting meeting transcription for {platform} platform")
         start_time = asyncio.get_event_loop().time()
-        
+
         try:
             # 1. Chunk audio based on platform strategy
             chunks = await self._chunk_audio(
-                audio_file_path, 
-                meeting_metadata, 
+                audio_file_path,
+                meeting_metadata,
                 platform,
                 chunk_duration_minutes,
                 overlap_seconds,
                 output_dir
             )
-            
+
             if not chunks:
                 raise ValueError("No audio chunks generated")
-            
-            # 2. Parallel transcription with semaphore
-            transcription_results = await self._transcribe_chunks_parallel(chunks, platform, models)
-            
-            # 3. Merge all chunk results into single transcription
-            merged_transcription = self._merge_transcription_results(transcription_results, meeting_metadata)
-            
+
+            # 2. Check for existing chunks if incremental saving is enabled
+            existing_chunk_results = []
+            chunks_to_process = chunks
+
+            if enable_incremental_saving and meeting_id and tenant_id:
+                from app.repository.transcription_chunk_repository import TranscriptionChunkRepository
+
+                chunk_repo = await TranscriptionChunkRepository.from_default()
+                existing_chunks = await chunk_repo.get_chunks(meeting_id, tenant_id, status="success")
+
+                if existing_chunks:
+                    # Extract completed chunk IDs
+                    completed_chunk_ids = {chunk["chunk_id"] for chunk in existing_chunks}
+
+                    # Filter: only process chunks that aren't completed
+                    chunks_to_process = [c for c in chunks if c.get("chunk_id") not in completed_chunk_ids]
+
+                    # Convert existing chunks to result format
+                    for existing_chunk in existing_chunks:
+                        if existing_chunk.get("result"):
+                            existing_chunk_results.append(existing_chunk["result"])
+
+                    logger.info(
+                        f"[TranscriptionService] Found {len(existing_chunks)} completed chunks, "
+                        f"processing {len(chunks_to_process)} remaining chunks"
+                    )
+
+            # 3. Parallel transcription with semaphore
+            new_transcription_results = []
+
+            if chunks_to_process:
+                if enable_incremental_saving and meeting_id and tenant_id:
+                    # Use incremental saving version
+                    new_transcription_results = await self._transcribe_chunks_parallel_with_saving(
+                        chunks_to_process,
+                        platform,
+                        meeting_id,
+                        tenant_id,
+                        models
+                    )
+                else:
+                    # Use regular version without saving
+                    new_transcription_results = await self._transcribe_chunks_parallel(
+                        chunks_to_process,
+                        platform,
+                        models
+                    )
+
+            # 4. Combine existing and new results
+            all_transcription_results = existing_chunk_results + new_transcription_results
+
+            # 5. Merge all chunk results into single transcription
+            merged_transcription = self._merge_transcription_results(all_transcription_results, meeting_metadata)
+
             # Add processing metadata
             end_time = asyncio.get_event_loop().time()
             processing_time = round((end_time - start_time) * 1000, 2)
-            
+
             merged_transcription["processing_metadata"] = {
                 "platform": platform,
                 "audio_file_path": audio_file_path,
                 "processing_time_ms": processing_time,
                 "chunk_duration_minutes": chunk_duration_minutes,
                 "overlap_seconds": overlap_seconds,
-                "max_concurrent": self.semaphore._value
+                "max_concurrent": self.semaphore._value,
+                "total_chunks": len(chunks),
+                "existing_chunks": len(existing_chunk_results),
+                "new_chunks": len(new_transcription_results)
             }
-            
-            logger.info(f"[TranscriptionService] Meeting transcription completed in {processing_time}ms")
+
+            logger.info(
+                f"[TranscriptionService] Meeting transcription completed in {processing_time}ms - "
+                f"{len(existing_chunk_results)} existing + {len(new_transcription_results)} new chunks"
+            )
             return merged_transcription
-            
+
         except Exception as e:
             logger.error(f"[TranscriptionService] Meeting transcription failed: {e}")
             raise

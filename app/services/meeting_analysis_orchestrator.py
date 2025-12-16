@@ -154,10 +154,13 @@ class MeetingAnalysisOrchestrator:
                 transcription_result = await transcription_service.transcribe_meeting(
                     audio_file_path=file_url,
                     meeting_metadata=meeting_metadata,
+                    meeting_id=meeting_id,
+                    tenant_id=tenant_id,
                     platform=platform,  # 'google' or 'offline'
                     chunk_duration_minutes=5.0 if platform == 'offline' else 10.0,
                     overlap_seconds=5.0,
-                    output_dir=temp_directory
+                    output_dir=temp_directory,
+                    enable_incremental_saving=True
                 )
 
                 # Step 1.3: Save transcription v1 to database
