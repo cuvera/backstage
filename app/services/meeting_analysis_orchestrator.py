@@ -6,6 +6,7 @@ import time
 from datetime import datetime
 import shutil
 from pathlib import Path
+import asyncio
 
 from app.schemas.meeting_analysis import MeetingAnalysis
 from app.services.transcription_service import TranscriptionService
@@ -147,21 +148,46 @@ class MeetingAnalysisOrchestrator:
                 if not file_url:
                     raise MeetingAnalysisOrchestratorError("Failed to prepare audio file")
 
-                # Step 1.2: Transcription with new TranscriptionService
+                # Step 1.2: Transcription with new TranscriptionService (with orchestrator-level retry)
                 logger.info(f"Step 1.2: Starting audio transcription with Gemini - meeting_id={meeting_id}")
                 transcription_service = TranscriptionService(max_concurrent=5)
 
-                transcription_result = await transcription_service.transcribe_meeting(
-                    audio_file_path=file_url,
-                    meeting_metadata=meeting_metadata,
-                    meeting_id=meeting_id,
-                    tenant_id=tenant_id,
-                    platform=platform,  # 'google' or 'offline'
-                    chunk_duration_minutes=5.0 if platform == 'offline' else 10.0,
-                    overlap_seconds=5.0,
-                    output_dir=temp_directory,
-                    enable_incremental_saving=True
-                )
+                # Orchestrator-level retry (2 attempts total with 5s wait)
+                max_orchestrator_retries = 2
+                orchestrator_retry_delay = 5
+                transcription_result = None
+                last_transcription_error = None
+
+                for orchestrator_attempt in range(max_orchestrator_retries):
+                    try:
+                        if orchestrator_attempt > 0:
+                            logger.info(f"Retrying transcription (orchestrator-level attempt {orchestrator_attempt + 1}/{max_orchestrator_retries}) after {orchestrator_retry_delay}s delay - meeting_id={meeting_id}")
+                            await asyncio.sleep(orchestrator_retry_delay)
+
+                        transcription_result = await transcription_service.transcribe_meeting(
+                            audio_file_path=file_url,
+                            meeting_metadata=meeting_metadata,
+                            meeting_id=meeting_id,
+                            tenant_id=tenant_id,
+                            platform=platform,  # 'google' or 'offline'
+                            chunk_duration_minutes=5.0 if platform == 'offline' else 10.0,
+                            overlap_seconds=5.0,
+                            output_dir=temp_directory,
+                            enable_incremental_saving=True
+                        )
+
+                        # Success, break out of retry loop
+                        logger.info(f"Transcription successful{' (after orchestrator retry)' if orchestrator_attempt > 0 else ''} - meeting_id={meeting_id}")
+                        break
+
+                    except Exception as e:
+                        last_transcription_error = e
+                        logger.error(f"Transcription failed (orchestrator-level attempt {orchestrator_attempt + 1}/{max_orchestrator_retries}) - meeting_id={meeting_id}: {e}")
+
+                        # If this was the last attempt, re-raise the error
+                        if orchestrator_attempt == max_orchestrator_retries - 1:
+                            logger.error(f"Transcription failed after {max_orchestrator_retries} orchestrator-level attempts - meeting_id={meeting_id}")
+                            raise
 
                 # Step 1.3: Save transcription v1 to database
                 logger.info(f"Step 1.3: Saving transcription v1 to database - meeting_id={meeting_id}")

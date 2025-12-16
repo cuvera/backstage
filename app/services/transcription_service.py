@@ -312,65 +312,90 @@ class TranscriptionService:
             except Exception as e:
                 logger.warning(f"[TranscriptionService] Failed to mark chunk {chunk_id} as processing: {e}")
 
-            try:
-                result = await task
-                result["chunk_info"] = {
-                    "chunk_id": chunk_id,
-                    "start_time": chunk.get("start_time"),
-                    "end_time": chunk.get("end_time"),
-                    "file_path": chunk.get("file_path")
-                }
+            # Retry logic with exponential backoff (3 attempts total)
+            max_retries = 3
+            retry_delays = [2, 4, 8]  # Exponential backoff in seconds
+            last_error = None
+            result = None
 
-                # Check for segment count mismatch
-                segments_sent = len(chunk.get("segments", []))
-                segments_returned = len(result.get("transcriptions", []))
-
-                if segments_sent != segments_returned:
-                    logger.warning(f"[TranscriptionService] Chunk {chunk_id} mismatch: "
-                                 f"sent {segments_sent} segments but received {segments_returned} transcriptions")
-
-                # Save successful chunk to database
+            for attempt in range(max_retries):
                 try:
-                    await chunk_repo.save_chunk(
-                        meeting_id=meeting_id,
-                        tenant_id=tenant_id,
-                        chunk_id=chunk_id,
-                        status="success",
-                        chunk_info=chunk,
-                        result=result
-                    )
-                    logger.info(f"[TranscriptionService] ✅ Chunk {chunk_id} transcribed and saved successfully")
-                except Exception as save_error:
-                    logger.error(f"[TranscriptionService] Failed to save chunk {chunk_id}: {save_error}")
-                    # Still add to results even if save fails
+                    if attempt > 0:
+                        delay = retry_delays[attempt - 1]
+                        logger.info(f"[TranscriptionService] Retrying chunk {chunk_id} (attempt {attempt + 1}/{max_retries}) after {delay}s delay")
+                        await asyncio.sleep(delay)
 
-                results.append(result)
+                        # Recreate task for retry
+                        prompt = base_prompt
+                        prompt = prompt.replace("{{start}}", chunk.get("start_time", ""))
+                        prompt = prompt.replace("{{end}}", chunk.get("end_time", ""))
+                        prompt = prompt.replace("{{segments}}", json.dumps(chunk.get("segments", [])))
 
-            except Exception as e:
-                logger.error(f"[TranscriptionService] Failed to transcribe chunk {chunk_id}: {e}")
+                        task = asyncio.create_task(
+                            self._transcribe_chunk_with_semaphore(prompt, chunk["file_path"], models)
+                        )
 
-                # Save failed chunk to database
-                try:
-                    await chunk_repo.save_chunk(
-                        meeting_id=meeting_id,
-                        tenant_id=tenant_id,
-                        chunk_id=chunk_id,
-                        status="failed",
-                        chunk_info=chunk,
-                        error=str(e)
-                    )
-                    logger.info(f"[TranscriptionService] ❌ Chunk {chunk_id} marked as failed")
-                except Exception as save_error:
-                    logger.error(f"[TranscriptionService] Failed to save failed chunk {chunk_id}: {save_error}")
-
-                # Add empty result to maintain order
-                results.append({
-                    "transcriptions": [],
-                    "chunk_info": {
+                    result = await task
+                    result["chunk_info"] = {
                         "chunk_id": chunk_id,
-                        "error": str(e)
+                        "start_time": chunk.get("start_time"),
+                        "end_time": chunk.get("end_time"),
+                        "file_path": chunk.get("file_path")
                     }
-                })
+
+                    # Check for segment count mismatch
+                    segments_sent = len(chunk.get("segments", []))
+                    segments_returned = len(result.get("transcriptions", []))
+
+                    if segments_sent != segments_returned:
+                        logger.warning(f"[TranscriptionService] Chunk {chunk_id} mismatch: "
+                                     f"sent {segments_sent} segments but received {segments_returned} transcriptions")
+
+                    # Save successful chunk to database
+                    try:
+                        await chunk_repo.save_chunk(
+                            meeting_id=meeting_id,
+                            tenant_id=tenant_id,
+                            chunk_id=chunk_id,
+                            status="success",
+                            chunk_info=chunk,
+                            result=result
+                        )
+                        logger.info(f"[TranscriptionService] ✅ Chunk {chunk_id} transcribed and saved successfully{' (after retry)' if attempt > 0 else ''}")
+                    except Exception as save_error:
+                        logger.error(f"[TranscriptionService] Failed to save chunk {chunk_id}: {save_error}")
+                        # Still add to results even if save fails
+
+                    results.append(result)
+                    break  # Success, exit retry loop
+
+                except Exception as e:
+                    last_error = e
+                    logger.error(f"[TranscriptionService] Failed to transcribe chunk {chunk_id} (attempt {attempt + 1}/{max_retries}): {e}")
+
+                    # If this was the last attempt, save as failed
+                    if attempt == max_retries - 1:
+                        try:
+                            await chunk_repo.save_chunk(
+                                meeting_id=meeting_id,
+                                tenant_id=tenant_id,
+                                chunk_id=chunk_id,
+                                status="failed",
+                                chunk_info=chunk,
+                                error=str(last_error)
+                            )
+                            logger.info(f"[TranscriptionService] ❌ Chunk {chunk_id} marked as failed after {max_retries} attempts")
+                        except Exception as save_error:
+                            logger.error(f"[TranscriptionService] Failed to save failed chunk {chunk_id}: {save_error}")
+
+                        # Add empty result to maintain order
+                        results.append({
+                            "transcriptions": [],
+                            "chunk_info": {
+                                "chunk_id": chunk_id,
+                                "error": str(last_error)
+                            }
+                        })
 
         logger.info(f"[TranscriptionService] Completed parallel transcription with saving of {len(results)} chunks")
         return results
