@@ -23,7 +23,7 @@ class AudioMergerError(Exception):
     pass
 
 
-def _get_audio_metadata_ffprobe(file_path: str) -> dict:
+async def _get_audio_metadata_ffprobe(file_path: str) -> dict:
     """
     Get audio metadata using ffprobe without loading file into memory.
 
@@ -37,14 +37,21 @@ def _get_audio_metadata_ffprobe(file_path: str) -> dict:
         AudioMergerError: If ffprobe fails
     """
     try:
-        result = subprocess.run([
+        process = await asyncio.create_subprocess_exec(
             'ffprobe', '-v', 'error',
             '-show_entries', 'format=duration:stream=sample_rate',
             '-of', 'json',
-            file_path
-        ], capture_output=True, text=True, check=True)
+            file_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
 
-        data = json.loads(result.stdout)
+        stdout, stderr = await process.communicate()
+
+        if process.returncode != 0:
+            raise AudioMergerError(f"ffprobe failed: {stderr.decode()}")
+
+        data = json.loads(stdout.decode())
 
         duration = float(data['format']['duration'])
         # Get sample rate from first audio stream
@@ -57,7 +64,7 @@ def _get_audio_metadata_ffprobe(file_path: str) -> dict:
         raise AudioMergerError(f"Failed to get audio metadata: {e}")
 
 
-def _merge_audio_files_ffmpeg(
+async def _merge_audio_files_ffmpeg(
     input_files: List[str],
     output_dir: str,
     output_name: str = "merged_output",
@@ -89,10 +96,10 @@ def _merge_audio_files_ffmpeg(
 
     # Create concat file list
     concat_list_path = output_path + '.concat.txt'
-    with open(concat_list_path, 'w') as f:
+    async with aiofiles.open(concat_list_path, 'w') as f:
         for file_path in input_files:
             escaped_path = file_path.replace("'", "'\\''")
-            f.write(f"file '{escaped_path}'\n")
+            await f.write(f"file '{escaped_path}'\n")
 
     try:
         # Check if we can use codec copy (all inputs match output format)
@@ -102,15 +109,20 @@ def _merge_audio_files_ffmpeg(
         if can_copy:
             # All inputs match output format: codec copy (fast, no re-encoding)
             logger.info(f"All inputs are {output_format}, using codec copy")
-            subprocess.run([
+            process = await asyncio.create_subprocess_exec(
                 'ffmpeg',
                 '-f', 'concat',
                 '-safe', '0',
                 '-i', concat_list_path,
                 '-c', 'copy',
                 '-y',
-                output_path
-            ], check=True, capture_output=True)
+                output_path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
+            if process.returncode != 0:
+                raise AudioMergerError(f"ffmpeg merge failed: {stderr.decode()}")
         else:
             # Need to re-encode to output format
             logger.info(f"Converting inputs to {output_format}")
@@ -129,25 +141,27 @@ def _merge_audio_files_ffmpeg(
                 logger.warning(f"Unknown format '{output_format}', defaulting to AAC")
                 codec_args = ['-c:a', 'aac', '-b:a', '128k']
 
-            subprocess.run([
+            process = await asyncio.create_subprocess_exec(
                 'ffmpeg',
                 '-f', 'concat',
                 '-safe', '0',
                 '-i', concat_list_path,
                 *codec_args,
                 '-y',
-                output_path
-            ], check=True, capture_output=True)
+                output_path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
+            if process.returncode != 0:
+                raise AudioMergerError(f"ffmpeg merge failed: {stderr.decode()}")
 
         logger.info(f"Merged audio file created: {output_path}")
         return output_path
 
-    except subprocess.CalledProcessError as e:
-        stderr_output = e.stderr.decode(errors='replace') if e.stderr else str(e)
-        raise AudioMergerError(f"ffmpeg merge failed: {stderr_output}")
     finally:
-        if os.path.exists(concat_list_path):
-            os.remove(concat_list_path)
+        if await asyncio.to_thread(os.path.exists, concat_list_path):
+            await asyncio.to_thread(os.remove, concat_list_path)
 
 
 async def merge_wav_files_from_s3(
@@ -206,10 +220,10 @@ async def merge_wav_files_from_s3(
             await download_s3_file(meeting_file, file_path, bucket)
 
             logger.debug("Meeting file downloaded successfully")
-            file_size = os.path.getsize(file_path)
+            file_size = await asyncio.to_thread(os.path.getsize, file_path)
 
             # Calculate metadata using ffprobe (no memory loading)
-            metadata = _get_audio_metadata_ffprobe(file_path)
+            metadata = await _get_audio_metadata_ffprobe(file_path)
             duration_seconds = metadata['duration']
 
             result = {
@@ -251,7 +265,7 @@ async def merge_wav_files_from_s3(
             logger.info(f"All {len(wav_files)} audio files downloaded successfully")
 
             # Merge audio files using ffmpeg (no memory loading, outputs M4A by default)
-            merged_file_path = _merge_audio_files_ffmpeg(
+            merged_file_path = await _merge_audio_files_ffmpeg(
                 local_files,
                 temp_dir,
                 output_name="merged_output",
@@ -269,8 +283,8 @@ async def merge_wav_files_from_s3(
                     raise AudioMergerError(f"Failed to upload merged file to s3://{bucket}/{output_s3_key}")
 
             # Calculate metadata using ffprobe (no memory loading)
-            file_size = os.path.getsize(merged_file_path)
-            metadata = _get_audio_metadata_ffprobe(merged_file_path)
+            file_size = await asyncio.to_thread(os.path.getsize, merged_file_path)
+            metadata = await _get_audio_metadata_ffprobe(merged_file_path)
             duration_seconds = metadata['duration']
         
             result = {
@@ -293,24 +307,25 @@ async def merge_wav_files_from_s3(
     finally:
         cleanup_start_time = time.time()
         cleaned_files_count = 0
-        
+
         # Cleanup temporary files (except merged_output.* which orchestrator handles)
-        if temp_dir and os.path.exists(temp_dir):
+        if temp_dir and await asyncio.to_thread(os.path.exists, temp_dir):
             import shutil
             try:
-                for file in os.listdir(temp_dir):
+                files_list = await asyncio.to_thread(os.listdir, temp_dir)
+                for file in files_list:
                     # Keep merged output file (any extension: .m4a, .wav, etc.)
                     if not file.startswith("merged_output."):
                         file_path = os.path.join(temp_dir, file)
-                        if os.path.isfile(file_path):
-                            os.remove(file_path)
+                        if await asyncio.to_thread(os.path.isfile, file_path):
+                            await asyncio.to_thread(os.remove, file_path)
                             cleaned_files_count += 1
                             logger.debug(f"Cleaned up intermediate file: {file}")
-                        elif os.path.isdir(file_path):
-                            shutil.rmtree(file_path)
+                        elif await asyncio.to_thread(os.path.isdir, file_path):
+                            await asyncio.to_thread(shutil.rmtree, file_path)
                             cleaned_files_count += 1
                             logger.debug(f"Cleaned up intermediate directory: {file}")
-                
+
                 if cleaned_files_count > 0:
                     logger.info(f"Cleaned up {cleaned_files_count} intermediate files")
             except Exception as e:
