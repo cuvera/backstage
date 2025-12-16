@@ -155,7 +155,7 @@ class MeetingAnalysisOrchestrator:
                     audio_file_path=file_url,
                     meeting_metadata=meeting_metadata,
                     platform=platform,  # 'google' or 'offline'
-                    chunk_duration_minutes=10.0,
+                    chunk_duration_minutes=5.0 if platform == 'offline' else 10.0,
                     overlap_seconds=5.0,
                     output_dir=temp_directory
                 )
