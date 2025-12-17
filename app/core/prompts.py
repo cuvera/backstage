@@ -17,6 +17,10 @@ TRANSCRIPTION REQUIREMENTS:
 - Use proper punctuation, capitalization, and grammar
 - Do not summarize or paraphrase - provide exact words spoken
 - sentiment for the segment eg. positive, negative, neutral, or mixed
+  1. Positive: Use when the speaker expresses approval, satisfaction, encouragement, gratitude, confidence, relief, excitement, agreement, or a clearly constructive tone.
+  2. Negative: Use when the speaker expresses frustration, dissatisfaction, concern, blame, anger, disappointment, rejection, or a clearly critical tone. 
+  3. Neutral: Use when the segment is primarily informational / factual / procedural, with no clear emotional valence.
+  4. Mixed: Use when the segment contains both positive and negative signals OR the speaker shows ambivalence (e.g., praise + concern, agreement + frustration)
 
 OUTPUT FORMAT:
 Please provide the transcription in JSON format with this structure:
@@ -26,7 +30,6 @@ Please provide the transcription in JSON format with this structure:
         "segment_id": <use the segment_id from input>,
         "start": <MM:SS use the exact start time from input>,
         "end": <MM:SS use the exact end time from input>,
-        "speaker": <use the label from input>,
         "transcription": <text or empty string if no speech>,
         "sentiment": <positive, negative, neutral, or mixed>
       }
@@ -42,6 +45,10 @@ TRANSCRIPTION REQUIREMENTS:
 - Do NOT merge or skip segments, even if they overlap
 - Do not summarize or paraphrase - provide exact words spoken
 - sentiment for the segment eg. positive, negative, neutral, or mixed
+  1. Positive: Use when the speaker expresses approval, satisfaction, encouragement, gratitude, confidence, relief, excitement, agreement, or a clearly constructive tone.
+  2. Negative: Use when the speaker expresses frustration, dissatisfaction, concern, blame, anger, disappointment, rejection, or a clearly critical tone. 
+  3. Neutral: Use when the segment is primarily informational / factual / procedural, with no clear emotional valence.
+  4. Mixed: Use when the segment contains both positive and negative signals OR the speaker shows ambivalence (e.g., praise + concern, agreement + frustration)
 
 OUTPUT FORMAT:
 Please provide the transcription in a strict JSON format. All start and end timestamps must be relative to the {{start}} start time (i.e., the audio segment begins at 00:00).
@@ -60,7 +67,7 @@ Please provide the transcription in a strict JSON format. All start and end time
 # - Convert all speech to text accurately and verbatim
 
 
-MEETING_PREP_SUGGESTION_PROMPT = """You are an expert meeting operations assistant. Produce an Executive Prep Pack (one-pager) for an upcoming online, recurring meeting. Always ground the pack in at least one previous meeting plus the diarized transcript + sentiment context described in TRANSCRIPTION_AND_SENTIMENT_ANALYSIS_PROMPT.
+MEETING_PREP_SUGGESTION_PROMPT = """You are an expert meeting operations assistant. Produce an Executive Prep Pack (one-pager) for an upcoming online, recurring meeting. Always ground the pack in at least one previous meeting plus the diarized transcript + sentiment context described in.
 
 🚨 CRITICAL: You MUST return EXACTLY this JSON structure (no deviations):
 {
