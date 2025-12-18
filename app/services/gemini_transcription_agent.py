@@ -252,7 +252,21 @@ class GeminiTranscriptionAgent:
             if is_truncated:
                 logger.warning(f"[Gemini Agent] Truncated response from {model} was still valid JSON")
 
-            logger.info(f"[Gemini Agent] Successfully parsed response from {model}")
+            # Log the structure of the response for debugging
+            transcriptions_count = 0
+            if "transcriptions" in result:
+                transcriptions_count = len(result.get("transcriptions", []))
+            elif "conversation" in result:
+                transcriptions_count = len(result.get("conversation", []))
+
+            logger.info(f"[Gemini Agent] Successfully parsed response from {model} - {transcriptions_count} segments found")
+
+            # Warn if response is empty
+            if transcriptions_count == 0:
+                logger.warning(f"[Gemini Agent] Gemini returned valid JSON but with 0 transcriptions/conversation entries")
+                logger.warning(f"[Gemini Agent] Response keys: {list(result.keys())}")
+                logger.warning(f"[Gemini Agent] Full response: {json.dumps(result, indent=2)}")
+
             return result
 
         except json.JSONDecodeError as e:
