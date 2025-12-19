@@ -280,7 +280,7 @@ class MeetingAnalysisOrchestrator:
                     next_meeting_id=next_meeting,
                     meeting_analysis=analysis,
                     meeting_metadata=meeting_metadata,
-                    platform=platform,
+                    platform=original_platform,
                     recurring_meeting_id=recurring_meeting_id,
                     previous_meeting_counts=2,
                     context={
