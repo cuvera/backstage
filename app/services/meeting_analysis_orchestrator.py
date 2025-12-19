@@ -148,8 +148,19 @@ class MeetingAnalysisOrchestrator:
                 if not file_url:
                     raise MeetingAnalysisOrchestratorError("Failed to prepare audio file")
 
+                # Check if we need to switch from google to offline mode
+                if platform == "google":
+                    speaker_timeframes = meeting_metadata.get("speaker_timeframes", [])
+                    if not speaker_timeframes:
+                        logger.warning(
+                            f"No speaker timeframes found for Google meeting, "
+                            f"switching to offline mode - meeting_id={meeting_id}"
+                        )
+                        platform = "offline"
+                        logger.info(f"Platform switched to offline for transcription - meeting_id={meeting_id}")
+
                 # Step 1.2: Transcription with new TranscriptionService (with orchestrator-level retry)
-                logger.info(f"Step 1.2: Starting audio transcription with Gemini - meeting_id={meeting_id}")
+                logger.info(f"Step 1.2: Starting audio transcription with Gemini (platform={platform}) - meeting_id={meeting_id}")
                 transcription_service = TranscriptionService(max_concurrent=5)
 
                 # Orchestrator-level retry (2 attempts total with 5s wait)
@@ -209,9 +220,18 @@ class MeetingAnalysisOrchestrator:
 
             step_duration_ms = round((time.time() - step_start_time) * 1000, 2)
             logger.info(f"Step 1 completed in {step_duration_ms}ms - meeting_id={meeting_id}")
-            
-            logger.debug("Waiting for 2 seconds before analysis...")
-            time.sleep(2)
+
+            # Validate transcription has segments before proceeding to analysis
+            transcript_segments = transcription.get('transcriptions', [])
+            if not transcript_segments or len(transcript_segments) == 0:
+                error_msg = "Transcription completed but produced no segments. Cannot proceed with analysis."
+                logger.error(f"{error_msg} - meeting_id={meeting_id}")
+                raise MeetingAnalysisOrchestratorError(error_msg)
+
+            logger.info(f"Transcription validation passed: {len(transcript_segments)} segments found - meeting_id={meeting_id}")
+
+            logger.debug("Waiting for 1 seconds before analysis...")
+            await asyncio.sleep(1);
 
             #################################################
             # Step 2: Meeting Analysis with CallAnalysisAgent
@@ -243,8 +263,8 @@ class MeetingAnalysisOrchestrator:
             step_duration_ms = round((time.time() - step_start_time) * 1000, 2)
             logger.info(f"Step 2 completed in {step_duration_ms}ms - meeting_id={meeting_id}")
             
-            logger.debug("Waiting for 2 seconds before meeting preparation...")
-            time.sleep(2)
+            logger.debug("Waiting for 1 seconds before meeting preparation...")
+            await asyncio.sleep(1)
 
             ############################################################
             # Step 3: Meeting Preparation with MeetingPrepCuratorService
