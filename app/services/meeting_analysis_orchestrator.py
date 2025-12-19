@@ -230,8 +230,8 @@ class MeetingAnalysisOrchestrator:
 
             logger.info(f"Transcription validation passed: {len(transcript_segments)} segments found - meeting_id={meeting_id}")
 
-            logger.debug("Waiting for 2 seconds before analysis...")
-            asyncio.sleep(2);
+            logger.debug("Waiting for 1 seconds before analysis...")
+            await asyncio.sleep(1);
 
             #################################################
             # Step 2: Meeting Analysis with CallAnalysisAgent
@@ -263,8 +263,8 @@ class MeetingAnalysisOrchestrator:
             step_duration_ms = round((time.time() - step_start_time) * 1000, 2)
             logger.info(f"Step 2 completed in {step_duration_ms}ms - meeting_id={meeting_id}")
             
-            logger.debug("Waiting for 2 seconds before meeting preparation...")
-            asyncio.sleep(2)
+            logger.debug("Waiting for 1 seconds before meeting preparation...")
+            await asyncio.sleep(1)
 
             ############################################################
             # Step 3: Meeting Preparation with MeetingPrepCuratorService
