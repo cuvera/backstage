@@ -54,8 +54,8 @@ class GeminiTranscriptionAgent:
 
         # Default configs if none provided
         self.models = models or [
-            {"model": "gemini-2.5-flash", "timeout": 90, "max_tokens": 20000},
-            {"model": "gemini-2.5-flash", "timeout": 180, "max_tokens": 24000},
+            {"model": "gemini-3-flash-preview", "timeout": 90, "max_tokens": 20000},
+            {"model": "gemini-3-flash-preview", "timeout": 180, "max_tokens": 24000},
             {"model": "gemini-2.5-pro", "timeout": 300, "max_tokens": 65535}
         ]
 
