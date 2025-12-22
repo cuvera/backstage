@@ -87,6 +87,9 @@ class MeetingAnalysisOrchestrator:
 
         logger.info(f"Starting meeting analysis - meeting_id={meeting_id}, tenant_id={tenant_id}")
 
+        # Save original platform for status updates (before it might be switched for transcription)
+        original_platform = platform
+
         next_meeting = None
         file_url = None
         temp_directory = None
@@ -99,7 +102,7 @@ class MeetingAnalysisOrchestrator:
             step_start_time = time.time()
             logger.info(f"Step 0: Preparing meeting context - meeting_id={meeting_id}")
 
-            await self._update_meeting_status(meeting_id, platform, 'analysing', tenant_id)
+            await self._update_meeting_status(meeting_id, original_platform, 'analysing', tenant_id)
 
             if platform == "google":
                 if not self.meeting_metadata_repo:
@@ -120,7 +123,7 @@ class MeetingAnalysisOrchestrator:
                     )
 
                     if next_meeting:
-                        await self._update_meeting_status(next_meeting, platform, 'analysing', tenant_id)
+                        await self._update_meeting_status(next_meeting, original_platform, 'analysing', tenant_id)
                         logger.info(f"Next meeting identified for prep pack - next_meeting_id={next_meeting}")
             else:
                 meeting_metadata = {}
@@ -148,8 +151,19 @@ class MeetingAnalysisOrchestrator:
                 if not file_url:
                     raise MeetingAnalysisOrchestratorError("Failed to prepare audio file")
 
+                # Check if we need to switch from google to offline mode
+                if platform == "google":
+                    speaker_timeframes = meeting_metadata.get("speaker_timeframes", [])
+                    if not speaker_timeframes:
+                        logger.warning(
+                            f"No speaker timeframes found for Google meeting, "
+                            f"switching to offline mode - meeting_id={meeting_id}"
+                        )
+                        platform = "offline"
+                        logger.info(f"Platform switched to offline for transcription - meeting_id={meeting_id}")
+
                 # Step 1.2: Transcription with new TranscriptionService (with orchestrator-level retry)
-                logger.info(f"Step 1.2: Starting audio transcription with Gemini - meeting_id={meeting_id}")
+                logger.info(f"Step 1.2: Starting audio transcription with Gemini (platform={platform}) - meeting_id={meeting_id}")
                 transcription_service = TranscriptionService(max_concurrent=5)
 
                 # Orchestrator-level retry (2 attempts total with 5s wait)
@@ -209,9 +223,18 @@ class MeetingAnalysisOrchestrator:
 
             step_duration_ms = round((time.time() - step_start_time) * 1000, 2)
             logger.info(f"Step 1 completed in {step_duration_ms}ms - meeting_id={meeting_id}")
-            
-            logger.debug("Waiting for 2 seconds before analysis...")
-            time.sleep(2)
+
+            # Validate transcription has segments before proceeding to analysis
+            transcript_segments = transcription.get('transcriptions', [])
+            if not transcript_segments or len(transcript_segments) == 0:
+                error_msg = "Transcription completed but produced no segments. Cannot proceed with analysis."
+                logger.error(f"{error_msg} - meeting_id={meeting_id}")
+                raise MeetingAnalysisOrchestratorError(error_msg)
+
+            logger.info(f"Transcription validation passed: {len(transcript_segments)} segments found - meeting_id={meeting_id}")
+
+            logger.debug("Waiting for 1 seconds before analysis...")
+            await asyncio.sleep(1);
 
             #################################################
             # Step 2: Meeting Analysis with CallAnalysisAgent
@@ -246,8 +269,8 @@ class MeetingAnalysisOrchestrator:
             step_duration_ms = round((time.time() - step_start_time) * 1000, 2)
             logger.info(f"Step 2 completed in {step_duration_ms}ms - meeting_id={meeting_id}")
             
-            logger.debug("Waiting for 2 seconds before meeting preparation...")
-            time.sleep(2)
+            logger.debug("Waiting for 1 seconds before meeting preparation...")
+            await asyncio.sleep(1)
 
             ############################################################
             # Step 3: Meeting Preparation with MeetingPrepCuratorService
@@ -260,7 +283,7 @@ class MeetingAnalysisOrchestrator:
                     next_meeting_id=next_meeting,
                     meeting_analysis=analysis,
                     meeting_metadata=meeting_metadata,
-                    platform=platform,
+                    platform=original_platform,
                     recurring_meeting_id=recurring_meeting_id,
                     previous_meeting_counts=2,
                     context={
@@ -269,7 +292,7 @@ class MeetingAnalysisOrchestrator:
                     }
                 )
 
-                await self._update_meeting_status(next_meeting, platform, 'scheduled', tenant_id)
+                await self._update_meeting_status(next_meeting, original_platform, 'scheduled', tenant_id)
                 logger.info(f"Meeting prep pack generated successfully - next_meeting_id={next_meeting}")
             else:
                 logger.info(f"Skipping meeting preparation - missing requirements - meeting_id={meeting_id}")
@@ -278,7 +301,7 @@ class MeetingAnalysisOrchestrator:
             logger.info(f"Step 3 completed in {step_duration_ms}ms - meeting_id={meeting_id}")
 
             # Update meeting status to completed on success
-            await self._update_meeting_status(meeting_id, platform, 'completed', tenant_id)
+            await self._update_meeting_status(meeting_id, original_platform, 'completed', tenant_id)
             
             # Step 4: Send email notification
             await self._send_meeting_completion_email(
@@ -295,12 +318,12 @@ class MeetingAnalysisOrchestrator:
 
         except Exception as e:
             logger.error(f"Meeting processing failed - meeting_id={meeting_id}, tenant_id={tenant_id}: {str(e)}", exc_info=True)
-            
-            if meeting_id and platform:
-                await self._update_meeting_status(str(meeting_id), platform, 'failed', tenant_id)
+
+            if meeting_id and original_platform:
+                await self._update_meeting_status(str(meeting_id), original_platform, 'failed', tenant_id)
 
                 if next_meeting:
-                    await self._update_meeting_status(next_meeting, platform, 'scheduled', tenant_id)
+                    await self._update_meeting_status(next_meeting, original_platform, 'scheduled', tenant_id)
             
             raise MeetingAnalysisOrchestratorError(f"Meeting processing failed: {str(e)}") from e
         finally:

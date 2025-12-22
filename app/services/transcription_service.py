@@ -467,14 +467,39 @@ class TranscriptionService:
         return segments
 
     def _calculate_average_sentiment(self, sentiments):
-        """Calculate average sentiment from list of sentiment strings"""
+        """Calculate average sentiment from list of sentiment strings with balanced mixed detection"""
         if not sentiments:
             return "neutral"
-        
-        sentiment_values = {"positive": 1, "neutral": 0, "negative": -1}
+
+        # Check if there's any explicit "mixed" sentiment
+        has_explicit_mixed = any(s.lower() == "mixed" for s in sentiments)
+
+        # Count sentiment types
+        sentiment_counts = {"positive": 0, "negative": 0, "neutral": 0, "mixed": 0}
+        for s in sentiments:
+            sentiment_type = s.lower()
+            if sentiment_type in sentiment_counts:
+                sentiment_counts[sentiment_type] += 1
+
+        # Calculate numeric average (treat "mixed" as 0)
+        sentiment_values = {"positive": 1, "neutral": 0, "negative": -1, "mixed": 0}
         total_value = sum(sentiment_values.get(s.lower(), 0) for s in sentiments)
         average = total_value / len(sentiments)
-        
+
+        # If any segment is explicitly mixed, return mixed
+        if has_explicit_mixed:
+            return "mixed"
+
+        # Check if there are both positive and negative sentiments
+        has_positive = sentiment_counts["positive"] > 0
+        has_negative = sentiment_counts["negative"] > 0
+
+        # If both positive and negative present, AND average is close to 0 (balanced weightage)
+        # Use a narrower threshold for "mixed" (e.g., -0.25 to 0.25)
+        if has_positive and has_negative and -0.25 <= average <= 0.25:
+            return "mixed"
+
+        # Otherwise use standard thresholds
         if average > 0.33:
             return "positive"
         elif average < -0.33:

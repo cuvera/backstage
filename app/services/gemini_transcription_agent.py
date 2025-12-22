@@ -54,8 +54,8 @@ class GeminiTranscriptionAgent:
 
         # Default configs if none provided
         self.models = models or [
-            {"model": "gemini-2.5-flash", "timeout": 90, "max_tokens": 20000},
-            {"model": "gemini-2.5-flash", "timeout": 180, "max_tokens": 24000},
+            {"model": "gemini-3-flash-preview", "timeout": 90, "max_tokens": 20000},
+            {"model": "gemini-3-flash-preview", "timeout": 180, "max_tokens": 24000},
             {"model": "gemini-2.5-pro", "timeout": 300, "max_tokens": 65535}
         ]
 
@@ -252,7 +252,21 @@ class GeminiTranscriptionAgent:
             if is_truncated:
                 logger.warning(f"[Gemini Agent] Truncated response from {model} was still valid JSON")
 
-            logger.info(f"[Gemini Agent] Successfully parsed response from {model}")
+            # Log the structure of the response for debugging
+            transcriptions_count = 0
+            if "transcriptions" in result:
+                transcriptions_count = len(result.get("transcriptions", []))
+            elif "conversation" in result:
+                transcriptions_count = len(result.get("conversation", []))
+
+            logger.info(f"[Gemini Agent] Successfully parsed response from {model} - {transcriptions_count} segments found")
+
+            # Warn if response is empty
+            if transcriptions_count == 0:
+                logger.warning(f"[Gemini Agent] Gemini returned valid JSON but with 0 transcriptions/conversation entries")
+                logger.warning(f"[Gemini Agent] Response keys: {list(result.keys())}")
+                logger.warning(f"[Gemini Agent] Full response: {json.dumps(result, indent=2)}")
+
             return result
 
         except json.JSONDecodeError as e:
