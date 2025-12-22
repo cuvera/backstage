@@ -230,7 +230,10 @@ class MeetingAnalysisOrchestrator:
                         context={
                             "tenant_id": tenant_id,
                             "session_id": meeting_id,
-                            "platform": platform
+                            "platform": platform,
+                            "meeting_title": meeting_metadata.get("summary"),
+                            "start_time": meeting_metadata.get("start_time"),
+                            "end_time": meeting_metadata.get("end_time")
                     }
                 )
 
