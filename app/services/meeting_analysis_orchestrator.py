@@ -87,6 +87,9 @@ class MeetingAnalysisOrchestrator:
 
         logger.info(f"Starting meeting analysis - meeting_id={meeting_id}, tenant_id={tenant_id}")
 
+        # Save original platform for status updates (before it might be switched for transcription)
+        original_platform = platform
+
         next_meeting = None
         file_url = None
         temp_directory = None
@@ -99,7 +102,7 @@ class MeetingAnalysisOrchestrator:
             step_start_time = time.time()
             logger.info(f"Step 0: Preparing meeting context - meeting_id={meeting_id}")
 
-            await self._update_meeting_status(meeting_id, platform, 'analysing', tenant_id)
+            await self._update_meeting_status(meeting_id, original_platform, 'analysing', tenant_id)
 
             if platform == "google":
                 if not self.meeting_metadata_repo:
@@ -120,7 +123,7 @@ class MeetingAnalysisOrchestrator:
                     )
 
                     if next_meeting:
-                        await self._update_meeting_status(next_meeting, platform, 'analysing', tenant_id)
+                        await self._update_meeting_status(next_meeting, original_platform, 'analysing', tenant_id)
                         logger.info(f"Next meeting identified for prep pack - next_meeting_id={next_meeting}")
             else:
                 meeting_metadata = {}
@@ -277,7 +280,7 @@ class MeetingAnalysisOrchestrator:
                     next_meeting_id=next_meeting,
                     meeting_analysis=analysis,
                     meeting_metadata=meeting_metadata,
-                    platform=platform,
+                    platform=original_platform,
                     recurring_meeting_id=recurring_meeting_id,
                     previous_meeting_counts=2,
                     context={
@@ -286,7 +289,7 @@ class MeetingAnalysisOrchestrator:
                     }
                 )
 
-                await self._update_meeting_status(next_meeting, platform, 'scheduled', tenant_id)
+                await self._update_meeting_status(next_meeting, original_platform, 'scheduled', tenant_id)
                 logger.info(f"Meeting prep pack generated successfully - next_meeting_id={next_meeting}")
             else:
                 logger.info(f"Skipping meeting preparation - missing requirements - meeting_id={meeting_id}")
@@ -295,7 +298,7 @@ class MeetingAnalysisOrchestrator:
             logger.info(f"Step 3 completed in {step_duration_ms}ms - meeting_id={meeting_id}")
 
             # Update meeting status to completed on success
-            await self._update_meeting_status(meeting_id, platform, 'completed', tenant_id)
+            await self._update_meeting_status(meeting_id, original_platform, 'completed', tenant_id)
             
             # Step 4: Send email notification
             await self._send_meeting_completion_email(
@@ -312,12 +315,12 @@ class MeetingAnalysisOrchestrator:
 
         except Exception as e:
             logger.error(f"Meeting processing failed - meeting_id={meeting_id}, tenant_id={tenant_id}: {str(e)}", exc_info=True)
-            
-            if meeting_id and platform:
-                await self._update_meeting_status(str(meeting_id), platform, 'failed', tenant_id)
+
+            if meeting_id and original_platform:
+                await self._update_meeting_status(str(meeting_id), original_platform, 'failed', tenant_id)
 
                 if next_meeting:
-                    await self._update_meeting_status(next_meeting, platform, 'scheduled', tenant_id)
+                    await self._update_meeting_status(next_meeting, original_platform, 'scheduled', tenant_id)
             
             raise MeetingAnalysisOrchestratorError(f"Meeting processing failed: {str(e)}") from e
         finally:
