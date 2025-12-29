@@ -58,6 +58,7 @@ class Settings(BaseSettings):
     RABBITMQ_VOICEPRINT_REGISTERED_QUEUE: str = Field(env="RABBITMQ_VOICEPRINT_REGISTERED_QUEUE")
     RABBITMQ_MEETING_INSIGHTS_GENERATION_QUEUE: str = Field(env="RABBITMQ_MEETING_INSIGHTS_GENERATION_QUEUE")
     RABBITMQ_MEETING_INSIGHTS_GENERATED_QUEUE: str = Field(env= "RABBITMQ_MEETING_INSIGHTS_GENERATED_QUEUE")
+    RABBITMQ_EMBEDDING_QUEUE: str = Field(default="meeting.embedding.ready", env="RABBITMQ_EMBEDDING_QUEUE")
 
     ENABLE_TRANSCRIPTION_CONSUMER: bool = Field(default=True, env="ENABLE_TRANSCRIPTION_CONSUMER")
 
@@ -65,6 +66,12 @@ class Settings(BaseSettings):
     QDRANT_URL: Optional[str] = Field(default=None, env="QDRANT_URL")
     QDRANT_COLLECTION_NAME: Optional[str] = Field(default=None, env="QDRANT_COLLECTION_NAME")
     QDRANT_API_KEY: Optional[str] = Field(default=None, env="QDRANT_API_KEY")
+
+    # QDRANT Meeting Configuration
+    QDRANT_MEETING_URL: Optional[str] = Field(default=None, env="QDRANT_MEETING_URL")
+    QDRANT_MEETING_API_KEY: Optional[str] = Field(default=None, env="QDRANT_MEETING_API_KEY")
+    QDRANT_MEETING_PORT: int = Field(default=6333, env="QDRANT_MEETING_PORT")
+    QDRANT_MEETING_COLLECTION_NAME: str = Field(default="meeting-transcripts-v1", env="QDRANT_MEETING_COLLECTION_NAME")
 
     CUVERA_CORE_SERVICE: str =Field(env="CUVERA_CORE_SERVICE")
     

@@ -193,7 +193,8 @@ class GeminiLLM(BaseLLM):
                 None,
                 lambda: genai.embed_content(
                     model=self.embedding_model,
-                    content=text
+                    content=text,
+                    task_type="RETRIEVAL_DOCUMENT"
                 )
             )
             return response['embedding']
