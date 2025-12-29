@@ -10,7 +10,7 @@ import asyncio
 
 from app.schemas.meeting_analysis import MeetingAnalysis
 from app.services.transcription_service import TranscriptionService
-from app.utils.audio_merger import merge_wav_files_from_s3, AudioMergerError
+from app.utils.audio_merger import find_files_from_s3, list_files_in_s3_folder
 from app.services.meeting_analysis_service import MeetingAnalysisService
 from app.repository import MeetingMetadataRepository
 from app.repository.transcription_v1_repository import TranscriptionV1Repository
@@ -489,13 +489,25 @@ class MeetingAnalysisOrchestrator:
             s3_folder_path = f"{payload.get('tenantId')}/{payload.get('platform')}/{payload.get('_id')}/"
             output_s3_key = f"{payload.get('tenantId')}/{payload.get('platform')}/{payload.get('_id')}/meeting.m4a"
 
-            merge_result = await merge_wav_files_from_s3(
+            # Get list of audio files - check for both .wav and .m4a (pre-merged file)
+            all_audio_files = await list_files_in_s3_folder(
                 s3_folder_path=s3_folder_path,
-                output_s3_key=output_s3_key,
                 bucket_name=bucket,
-                temp_dir=str(temp_dir)
+                file_extension=[".webm", ".m4a", ".mp3", ".mp4"]  # Check multiple formats
             )
-            file_url = merge_result['local_merged_file_path']
+
+            if all_audio_files and len(all_audio_files) == 1:
+                s3_file_path = all_audio_files[0]
+                file_url = str(temp_dir / s3_file_path)
+                await download_s3_file(s3_file_path, file_url, bucket)
+            else:
+                merge_result = await find_files_from_s3(
+                    s3_folder_path=s3_folder_path,
+                    output_s3_key=output_s3_key,
+                    bucket_name=bucket,
+                    temp_dir=str(temp_dir)
+                )
+                file_url = merge_result['local_merged_file_path']
         else:
             # Preserve original file extension from S3 key
             s3_file_key = payload.get('fileUrl')
@@ -503,16 +515,16 @@ class MeetingAnalysisOrchestrator:
             file_url = str(temp_dir / f"merged_output{original_extension}")
             await download_s3_file(s3_file_key, file_url, bucket)
 
-            # Convert to M4A if not already M4A
-            file_ext = Path(file_url).suffix.lower()
-            if file_ext != '.m4a':
-                logger.info(f"Non-M4A format detected ({file_ext}), converting to M4A - meeting_id={meeting_id}")
-                conversion_start_time = time.time()
+        # Convert to M4A if not already M4A
+        file_ext = Path(file_url).suffix.lower()
+        if file_ext != '.m4a':
+            logger.info(f"Non-M4A format detected ({file_ext}), converting to M4A - meeting_id={meeting_id}")
+            conversion_start_time = time.time()
 
-                file_url = await self._convert_to_m4a(file_url, str(temp_dir))
+            file_url = await self._convert_to_m4a(file_url, str(temp_dir))
 
-                conversion_duration_ms = round((time.time() - conversion_start_time) * 1000, 2)
-                logger.info(f"Audio conversion completed in {conversion_duration_ms}ms - meeting_id={meeting_id}")
+            conversion_duration_ms = round((time.time() - conversion_start_time) * 1000, 2)
+            logger.info(f"Audio conversion completed in {conversion_duration_ms}ms - meeting_id={meeting_id}")
 
         # Validate file size
         if os.path.exists(file_url):
