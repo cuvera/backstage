@@ -20,6 +20,7 @@ from app.services.agents import TranscriptionAgent, CallAnalysisAgent
 from app.services.meeting_prep_curator_service import MeetingPrepCuratorService
 from app.messaging.producers.meeting_status_producer import send_meeting_status
 from app.messaging.producers.email_notification_producer import send_email_notification
+from app.messaging.producers.meeting_embedding_ready_producer import send_meeting_embedding_ready
 from app.utils.auth_service_client import AuthServiceClient
 
 logger = logging.getLogger(__name__)
@@ -316,7 +317,14 @@ class MeetingAnalysisOrchestrator:
                 meeting_metadata=meeting_metadata,
                 transcription=transcription
             )
-            
+
+            # Step 5: Send meeting embedding ready event
+            send_meeting_embedding_ready(
+                meeting_id=meeting_id,
+                tenant_id=tenant_id,
+                platform=original_platform
+            )
+
             total_duration_ms = round((time.time() - overall_start_time) * 1000, 2)
             logger.info(f"Meeting analysis completed successfully in {total_duration_ms}ms - meeting_id={meeting_id}, tenant_id={tenant_id}")
             return True
