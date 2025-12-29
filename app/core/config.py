@@ -72,7 +72,9 @@ class Settings(BaseSettings):
 
     RABBITMQ_PAINPOINT_CAPTURED_QUEUE: str = Field(env="painpoint.captured.q",)
     RABBITMQ_MEETING_PROCESSING_QUEUE: str = Field(default="dev.meetings.completed.v1", env="RABBITMQ_MEETING_PROCESSING_QUEUE")
+    RABBITMQ_OFFLINE_MEETING_PROCESSING_QUEUE: str = Field(default="dev.meetings.completed.v1", env="RABBITMQ_OFFLINE_MEETING_PROCESSING_QUEUE")
     RABBITMQ_BACKSTAGE_RETRY_QUEUE: str = Field(default="meetings.analysis.retry", env="RABBITMQ_BACKSTAGE_RETRY_QUEUE")
+    RABBITMQ_RECORDER_COMPLETED_QUEUE: str = Field(default="meetings.recorder.completed.v1", env="RABBITMQ_RECORDER_COMPLETED_QUEUE")
     EMAIL_NOTIFICATIONS_ROUTING_KEY: str = Field(default="dev.integration.email.notifications.v1", env="EMAIL_NOTIFICATIONS_ROUTING_KEY")
     MEETING_BUCKET_NAME: str = Field(default="recordings", env="MEETING_BUCKET_NAME")
 
