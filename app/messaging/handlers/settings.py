@@ -30,6 +30,7 @@ QUEUE_CONFIG = {
     # Embedding queue
     EMBEDDING_ROUTING_KEY: {
         "handler": "meeting_embedding_handler"
+    },
 
     # Recorder Completion queue
     RECORDER_COMPLETED_ROUTING_KEY: {
