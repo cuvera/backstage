@@ -56,7 +56,7 @@ async def download_s3_file(
     try:
         s3_client = get_s3_client()
         
-        logger.debug(f"Downloading s3://{bucket}/{s3_key} to {local_path}")
+        logger.info(f"Downloading s3://{bucket}/{s3_key} to {local_path}")
         
         # Create parent directory if it doesn't exist
         os.makedirs(os.path.dirname(local_path), exist_ok=True)
