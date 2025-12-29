@@ -205,15 +205,22 @@ class ScoringReason(BaseModel):
 class CallScoring(BaseModel):
     """Overall meeting quality score with detailed breakdown."""
     score: float = Field(..., ge=0.0, le=10.0, description="Final meeting score from 0-10")
-    grade: str = Field(..., description="Letter grade: A, B, C, D, F")
-    reasons: List[ScoringReason] = Field(default_factory=list, description="List of reasons supporting the score")
-    summary: str = Field(..., min_length=1, description="Brief summary of overall meeting quality")
     
+    # Inferred Context (Chain-of-Thought)
+    identified_agenda: str = Field(..., description="The agenda inferred from the meeting kickoff/intro")
+    
+    # 6 Key Factors
+    agenda_deviation_score: float = Field(..., ge=0.0, le=10.0, description="Score for agenda adherence (0-10)")
     action_item_completeness_score: float = Field(..., ge=0.0, le=10.0, description="Score for action item quality (0-10)")
     owner_clarity_score: float = Field(..., ge=0.0, le=10.0, description="Score for owner assignment clarity (0-10)")
     due_date_quality_score: float = Field(..., ge=0.0, le=10.0, description="Score for due date quality (0-10)")
     meeting_structure_score: float = Field(..., ge=0.0, le=10.0, description="Score for meeting structure & decision flow (0-10)")
     signal_noise_ratio_score: float = Field(..., ge=0.0, le=10.0, description="Score for signal vs noise ratio (0-10)")
+    time_management_score: float = Field(..., ge=0.0, le=10.0, description="Score for schedule adherence (0-10)")
+    
+    # Qualitative Feedback
+    positive_aspects: List[str] = Field(default_factory=list, description="List of positive aspects / clear wins")
+    areas_for_improvement: List[str] = Field(default_factory=list, description="List of areas for improvement")
 
 
 class TimelineHighlight(BaseModel):
@@ -238,6 +245,8 @@ class MeetingAnalysis(BaseModel):
     )
     transcript_language: Optional[str] = None
     duration: Optional[str] = Field(None, description="Meeting duration in HH:MM:SS format")
+    is_overtime: bool = Field(default=False, description="True if meeting exceeded scheduled time")
+    overtime_duration: str = Field(default="0 min", description="Duration of overrun e.g. '15 min'")
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
