@@ -164,7 +164,7 @@ async def _merge_audio_files_ffmpeg(
             await asyncio.to_thread(os.remove, concat_list_path)
 
 
-async def merge_wav_files_from_s3(
+async def find_files_from_s3(
     s3_folder_path: str,
     output_s3_key: str,
     bucket_name: Optional[str] = None,
@@ -196,7 +196,7 @@ async def merge_wav_files_from_s3(
         logger.info("Starting audio merge operation")
 
         # Get list of audio files - check for both .wav and .m4a (pre-merged file)
-        all_audio_files = await list_wav_files_in_s3_folder(
+        all_audio_files = await list_files_in_s3_folder(
             s3_folder_path=s3_folder_path,
             bucket_name=bucket,
             file_extension=[".wav", ".m4a"]  # Check multiple formats
@@ -341,7 +341,7 @@ async def merge_wav_files_from_s3(
                 logger.warning(f"Failed to cleanup intermediate files: {str(e)}", exc_info=True)
 
 
-async def list_wav_files_in_s3_folder(
+async def list_files_in_s3_folder(
     s3_folder_path: str,
     bucket_name: Optional[str] = None,
     file_extension: Any = ".wav"
@@ -366,7 +366,7 @@ async def list_wav_files_in_s3_folder(
         if not s3_folder_path.endswith('/'):
             s3_folder_path += '/'
 
-        logger.debug("Listing files in S3 folder")
+        logger.info(f"Listing files in S3 folder: {bucket}/{s3_folder_path}")
 
         # Convert file_extension to list if it's a string
         extensions = [file_extension] if isinstance(file_extension, str) else file_extension

@@ -10,7 +10,7 @@ import asyncio
 
 from app.schemas.meeting_analysis import MeetingAnalysis
 from app.services.transcription_service import TranscriptionService
-from app.utils.audio_merger import merge_wav_files_from_s3, AudioMergerError
+from app.utils.audio_merger import find_files_from_s3, list_files_in_s3_folder
 from app.services.meeting_analysis_service import MeetingAnalysisService
 from app.repository import MeetingMetadataRepository
 from app.repository.transcription_v1_repository import TranscriptionV1Repository
@@ -20,6 +20,7 @@ from app.services.agents import TranscriptionAgent, CallAnalysisAgent
 from app.services.meeting_prep_curator_service import MeetingPrepCuratorService
 from app.messaging.producers.meeting_status_producer import send_meeting_status
 from app.messaging.producers.email_notification_producer import send_email_notification
+from app.messaging.producers.meeting_embedding_ready_producer import send_meeting_embedding_ready
 from app.utils.auth_service_client import AuthServiceClient
 
 logger = logging.getLogger(__name__)
@@ -144,10 +145,15 @@ class MeetingAnalysisOrchestrator:
 
             if not transcription:
                 logger.info(f"Step 1.1: No existing transcription found, preparing audio file - meeting_id={meeting_id}")
+                
+                # if payload.get("fileUrl"):
+                    # file_url = payload.get("fileUrl")
+                    # temp_directory = "tmp_data"
+                # else:
                 prepare_audio_file = await self._prepare_audio_file(payload)
-
                 file_url = prepare_audio_file.get("local_merged_file_path")
                 temp_directory = prepare_audio_file.get("temp_directory")
+                
                 if not file_url:
                     raise MeetingAnalysisOrchestratorError("Failed to prepare audio file")
 
@@ -253,7 +259,10 @@ class MeetingAnalysisOrchestrator:
                         context={
                             "tenant_id": tenant_id,
                             "session_id": meeting_id,
-                            "platform": platform
+                            "platform": platform,
+                            "meeting_title": meeting_metadata.get("summary"),
+                            "start_time": meeting_metadata.get("start_time"),
+                            "end_time": meeting_metadata.get("end_time")
                     }
                 )
 
@@ -308,7 +317,14 @@ class MeetingAnalysisOrchestrator:
                 meeting_metadata=meeting_metadata,
                 transcription=transcription
             )
-            
+
+            # Step 5: Send meeting embedding ready event
+            send_meeting_embedding_ready(
+                meeting_id=meeting_id,
+                tenant_id=tenant_id,
+                platform=original_platform
+            )
+
             total_duration_ms = round((time.time() - overall_start_time) * 1000, 2)
             logger.info(f"Meeting analysis completed successfully in {total_duration_ms}ms - meeting_id={meeting_id}, tenant_id={tenant_id}")
             return True
@@ -368,6 +384,80 @@ class MeetingAnalysisOrchestrator:
         except Exception as e:
             logger.warning(f"Failed to update meeting status to {status} for meeting {meeting_id}: {e}")
 
+    async def _convert_to_m4a(self, input_file_path: str, temp_dir: str) -> str:
+        """
+        Convert any audio file to M4A format using FFmpeg.
+
+        Args:
+            input_file_path: Path to the audio file (any format)
+            temp_dir: Temporary directory for the converted file
+
+        Returns:
+            Path to the converted M4A file
+
+        Raises:
+            MeetingAnalysisOrchestratorError: If conversion fails
+        """
+        input_ext = Path(input_file_path).suffix.lower()
+        output_file_path = str(Path(temp_dir) / "merged_output.m4a")
+
+        # Log conversion start
+        logger.info(f"Converting {input_ext} to M4A: {input_file_path}")
+
+        # FFmpeg command - matches audio_merger.py pattern (line 132)
+        ffmpeg_cmd = [
+            'ffmpeg',
+            '-i', input_file_path,
+            '-c:a', 'aac',          # AAC audio codec
+            '-b:a', '128k',         # 128k bitrate (matches existing pattern)
+            '-vn',                  # No video (audio only)
+            '-y',                   # Overwrite output file
+            output_file_path
+        ]
+
+        # Execute conversion - async pattern from audio_merger.py lines 112-125
+        process = await asyncio.create_subprocess_exec(
+            *ffmpeg_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+
+        stdout, stderr = await process.communicate()
+
+        # Check for errors
+        if process.returncode != 0:
+            error_output = stderr.decode(errors='replace')
+            raise MeetingAnalysisOrchestratorError(
+                f"Audio to M4A conversion failed: {error_output}"
+            )
+
+        # Validate converted file exists and has content
+        if not os.path.exists(output_file_path):
+            raise MeetingAnalysisOrchestratorError(
+                f"Converted file not found: {output_file_path}"
+            )
+
+        converted_size = os.path.getsize(output_file_path)
+        if converted_size == 0:
+            raise MeetingAnalysisOrchestratorError(
+                "Converted file is empty"
+            )
+
+        # Log success with file sizes
+        original_size_mb = os.path.getsize(input_file_path) / (1024 ** 2)
+        converted_size_mb = converted_size / (1024 ** 2)
+        logger.info(
+            f"Audio conversion completed ({input_ext} → M4A) - "
+            f"original: {original_size_mb:.2f}MB, "
+            f"converted: {converted_size_mb:.2f}MB"
+        )
+
+        # Clean up original file
+        await asyncio.to_thread(os.remove, input_file_path)
+        logger.debug(f"Removed original file: {input_file_path}")
+
+        return output_file_path
+
     async def _prepare_audio_file(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Prepare audio file for processing."""
         bucket = payload.get('bucket', settings.MEETING_BUCKET_NAME)
@@ -399,19 +489,42 @@ class MeetingAnalysisOrchestrator:
             s3_folder_path = f"{payload.get('tenantId')}/{payload.get('platform')}/{payload.get('_id')}/"
             output_s3_key = f"{payload.get('tenantId')}/{payload.get('platform')}/{payload.get('_id')}/meeting.m4a"
 
-            merge_result = await merge_wav_files_from_s3(
+            # Get list of audio files - check for both .wav and .m4a (pre-merged file)
+            all_audio_files = await list_files_in_s3_folder(
                 s3_folder_path=s3_folder_path,
-                output_s3_key=output_s3_key,
                 bucket_name=bucket,
-                temp_dir=str(temp_dir)
+                file_extension=[".webm", ".m4a", ".mp3", ".mp4"]  # Check multiple formats
             )
-            file_url = merge_result['local_merged_file_path']
+
+            if all_audio_files and len(all_audio_files) == 1:
+                s3_file_path = all_audio_files[0]
+                file_url = str(temp_dir / s3_file_path)
+                await download_s3_file(s3_file_path, file_url, bucket)
+            else:
+                merge_result = await find_files_from_s3(
+                    s3_folder_path=s3_folder_path,
+                    output_s3_key=output_s3_key,
+                    bucket_name=bucket,
+                    temp_dir=str(temp_dir)
+                )
+                file_url = merge_result['local_merged_file_path']
         else:
             # Preserve original file extension from S3 key
             s3_file_key = payload.get('fileUrl')
             original_extension = Path(s3_file_key).suffix or '.m4a'
             file_url = str(temp_dir / f"merged_output{original_extension}")
             await download_s3_file(s3_file_key, file_url, bucket)
+
+        # Convert to M4A if not already M4A
+        file_ext = Path(file_url).suffix.lower()
+        if file_ext != '.m4a':
+            logger.info(f"Non-M4A format detected ({file_ext}), converting to M4A - meeting_id={meeting_id}")
+            conversion_start_time = time.time()
+
+            file_url = await self._convert_to_m4a(file_url, str(temp_dir))
+
+            conversion_duration_ms = round((time.time() - conversion_start_time) * 1000, 2)
+            logger.info(f"Audio conversion completed in {conversion_duration_ms}ms - meeting_id={meeting_id}")
 
         # Validate file size
         if os.path.exists(file_url):
