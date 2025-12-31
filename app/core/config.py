@@ -58,6 +58,7 @@ class Settings(BaseSettings):
     RABBITMQ_VOICEPRINT_REGISTERED_QUEUE: str = Field(env="RABBITMQ_VOICEPRINT_REGISTERED_QUEUE")
     RABBITMQ_MEETING_INSIGHTS_GENERATION_QUEUE: str = Field(env="RABBITMQ_MEETING_INSIGHTS_GENERATION_QUEUE")
     RABBITMQ_MEETING_INSIGHTS_GENERATED_QUEUE: str = Field(env= "RABBITMQ_MEETING_INSIGHTS_GENERATED_QUEUE")
+    RABBITMQ_EMBEDDING_QUEUE: str = Field(default="meeting.embedding.ready", env="RABBITMQ_EMBEDDING_QUEUE")
 
     ENABLE_TRANSCRIPTION_CONSUMER: bool = Field(default=True, env="ENABLE_TRANSCRIPTION_CONSUMER")
 
@@ -66,13 +67,21 @@ class Settings(BaseSettings):
     QDRANT_COLLECTION_NAME: Optional[str] = Field(default=None, env="QDRANT_COLLECTION_NAME")
     QDRANT_API_KEY: Optional[str] = Field(default=None, env="QDRANT_API_KEY")
 
+    # QDRANT Meeting Configuration
+    QDRANT_MEETING_URL: Optional[str] = Field(default=None, env="QDRANT_MEETING_URL")
+    QDRANT_MEETING_API_KEY: Optional[str] = Field(default=None, env="QDRANT_MEETING_API_KEY")
+    QDRANT_MEETING_PORT: int = Field(default=6333, env="QDRANT_MEETING_PORT")
+    QDRANT_MEETING_COLLECTION_NAME: str = Field(default="meeting-transcripts-v1", env="QDRANT_MEETING_COLLECTION_NAME")
+
     CUVERA_CORE_SERVICE: str =Field(env="CUVERA_CORE_SERVICE")
     
     AUTH_SERVICE_URL: str = Field(default="http://localhost:7005", env="AUTH_SERVICE_URL")
 
     RABBITMQ_PAINPOINT_CAPTURED_QUEUE: str = Field(env="painpoint.captured.q",)
     RABBITMQ_MEETING_PROCESSING_QUEUE: str = Field(default="dev.meetings.completed.v1", env="RABBITMQ_MEETING_PROCESSING_QUEUE")
+    RABBITMQ_OFFLINE_MEETING_PROCESSING_QUEUE: str = Field(default="dev.meetings.completed.v1", env="RABBITMQ_OFFLINE_MEETING_PROCESSING_QUEUE")
     RABBITMQ_BACKSTAGE_RETRY_QUEUE: str = Field(default="meetings.analysis.retry", env="RABBITMQ_BACKSTAGE_RETRY_QUEUE")
+    RABBITMQ_RECORDER_COMPLETED_QUEUE: str = Field(default="meetings.recorder.completed.v1", env="RABBITMQ_RECORDER_COMPLETED_QUEUE")
     EMAIL_NOTIFICATIONS_ROUTING_KEY: str = Field(default="dev.integration.email.notifications.v1", env="EMAIL_NOTIFICATIONS_ROUTING_KEY")
     MEETING_BUCKET_NAME: str = Field(default="recordings", env="MEETING_BUCKET_NAME")
 

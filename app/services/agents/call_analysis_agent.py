@@ -30,6 +30,151 @@ class CallAnalysisAgentError(Exception):
     """Raised when the call analysis agent cannot complete its task."""
 
 
+
+CALL_ANALYSIS_PROMPT_TEMPLATE = """You are a senior meeting analyst. Read the full transcript and produce a single JSON object.
+STRICT OUTPUT CONTRACT (one object, no comments, no markdown):
+{
+  "summary": string,
+  "key_points": [string],
+  "decisions": [{"title": string, "owner": string|null, "due_date": string|null, "references": [{"start": "HH:MM:SS", "end": "HH:MM:SS"}]}],
+  "action_items": [{"task": string, "owner": string|null, "due_date": string|null, "priority": string|null, "references": [{"start": "HH:MM:SS", "end": "HH:MM:SS"}]}],
+  "call_scoring": {
+    "identified_agenda": string,
+    "agenda_deviation": number (0-10),
+    "action_completeness": number (0-10),
+    "owner_clarity": number (0-10),
+    "due_date_quality": number (0-10),
+    "structure": number (0-10),
+    "snr": number (0-10),
+    "time_management_score": number (0-10),
+    "positive_aspects": [string],
+    "areas_for_improvement": [string]
+  }
+}
+
+QUALITY RULES AND FIELD DEFINITIONS (PRODUCTION-GRADE FRAMEWORK):
+
+1. **THE DECISION GATE (Strict Strategic Separation):**
+   - **Definition:** A decision is a **STRATEGIC STATE CHANGE** or **FINAL APPROVAL** that affects the project/team direction.
+   - **Detail Rule:** Titles must be **comprehensive (15-25 words)** explaining the *Decision*, the *Reasoning*, and the *Implication*.
+   - **Bad:** "Budget approved."
+   - **Good:** "Budget approved for Q4 Marketing push to aggressively target enterprise leads, allocated from the R&D surplus."
+   - **EXCLUSION RULES:** 
+     - Agreeing to "schedule a meeting" is **NEVER** a decision.
+     - Agreeing to "investigate X" is **NEVER** a decision.
+
+2. **THE MATERIALITY FILTER (Triviality Check):**
+   - **CRITICAL RULE:** Do NOT capture "housekeeping" or "administrative" trivia.
+   - **EXCLUDE:** "Send me the link", "I'll invite you", "Let's sync up".
+   - **INCLUDE Only if:** The task requires **significant effort** or produces a **key deliverable**.
+
+3. **THE ACTION TEST (Business Value):**
+   - **Definition:** A tactical task assigned to an owner that produces a **Business Deliverable**.
+   - **Detail Rule:** Tasks must be **specific and context-rich**. Include *WHAT* to do, *WHO* is it for, and *WHY*.
+   - **Bad:** "Send report."
+   - **Good:** "Compile and send the Q3 user adoption report to the Board to support the new funding proposal."
+   - **Rule:** Ask "If this is not done, does the project suffer?" If yes, capture it. If no, ignore it.
+
+3. **OWNER INTEGRITY CHECK:**
+   - **Strict Assignment:** Only assign an 'owner' if the transcript EXPLICITLY names them or refers to them directly (e.g., "Bob, please handle this").
+   - **No Hallucinations:** Do NOT infer ownership based on who spoke the most. If unclear, use `null`.
+   - **Action vs Decision Owners:**
+     - **Action Items:** Must have an owner if possible.
+     - **Decisions:** Rarely have "owners". Only assign if they are the sole approver.
+
+4. **Summary:** A comprehensive, high-level overview (4-6 crisp sentences) covering the main **purpose/goals**, the final **outcomes**, and any major **follow-up** steps.
+5. **Key Points:** Specific, factual, bullet-style highlights (strings) of significant **progress**, **blockers**, **metrics**, or **updates** discussed.
+6. **REFERENCES:** All decisions and action_items MUST include time-based references in HH:MM:SS format (e.g., {"start": "00:05:32", "end": "00:06:15"}). Use timestamps from the transcript directly.
+7. **JSON CONTRACT:**
+   - Use null (not empty string) for unknown owner/due_date/priority fields.
+   - Use [] for empty arrays; never use null or omit required keys.
+   - Output MUST be valid JSON — no code fences, trailing commas, extra keys, or explanatory text.
+
+CALL SCORING (PRODUCTION-GRADE CALCULATION):
+You must score the meeting on 6 specific factors (0-10) based on the strict criteria below. Analyze the transcript deeply to derive these scores.
+
+**STEP 0: AGENDA INFERENCE**
+   - **Goal:** Synthesize the 'Intended Agenda' by intelligently weighing multiple signals. Use your judgment to determine what the meeting was *supposed* to be about.
+   - **Signals to Consider:**
+     1. **Explicit Statements:** "The goal today is...", "I want to review..." (Strongest signal).
+     2. **Implicit Structure:** If no kickoff exists, look for the first substantial business topic that stabilizes after social chatter.
+     3. **Noise Filtering:** Aggressively ignore "weekend talk" or "waiting for people" phases, even if they are long.
+   - **Smart Synthesis:** Do NOT blindly take the first sentence. Combine these signs to infer the true purpose. If the meeting starts with a rant but then settles into a roadmap review, the roadmap review is the agenda.
+   - **Formulate:** A specific 'identified_agenda' string summarizing this synthesized intent.
+   - **Use this Base:** You MUST use this inferred 'identified_agenda' as the baseline for scoring 'Agenda Deviation' below.
+
+1. **Agenda Deviation (Weight 15%):**
+   - **What it measures:** How well the meeting stuck to the *identified_agenda* you found above.
+   - **Scoring Rubric:**
+     * **10:** Agenda clearly stated, followed, minimal unrelated discussion.
+     * **7-9:** Minor deviations but agenda regained quickly.
+     * **4-6:** Multiple deviations; key items partially covered.
+     * **0-3:** Largely off-track; agenda not followed or never established.
+   - **Signals:**
+     * (+): Explicit agenda set at start + referenced again later.
+     * (-): Long digressions, repeated 'we are going off-topic'.
+
+2. **Action Items Completeness (Weight 20%):**
+   - **What it measures:** Clarity and executability of action items.
+   - **Scoring Rubric:**
+     * **10:** Tasks are specific + actionable (what + expected output + scope).
+   - **Penalties:**
+     * Vague verbs ('check', 'look into') without specified deliverable.
+     * Missing context (what system/module/process?).
+     * No acceptance criteria.
+
+3. **Owner Assignment Clarity (Weight 15%):**
+   - **What it measures:** Whether each major action/decision has a clear accountable owner.
+   - **Scoring Rubric:**
+     * **10:** Almost all major items have a named owner (or 'team/role' explicitly).
+   - **Penalties:**
+     * 'Someone should...', 'We should...' without assigning responsibility.
+     * Ambiguous owners ('they', 'you guys').
+
+4. **Due Date Quality (Weight 10%):**
+   - **What it measures:** Presence + specificity + realism of due dates.
+   - **Scoring Rubric:**
+     * **10:** Due dates are mostly concrete (date/time or clear timeframe) and reasonable.
+   - **Penalties:**
+     * No due date specified.
+     * Vague timelines ('ASAP', 'soon') unless clarified.
+     * Unrealistic deadlines vs task scope (flag as quality issue).
+
+5. **Meeting Structure (Weight 15%):**
+   - **What it measures:** Logical flow: problem -> discussion -> decision -> next steps.
+   - **Scoring Rubric:**
+     * **10:** Structured conversation, minimal looping, decisions captured cleanly.
+   - **Penalties:**
+     * Circular debate without closure.
+     * Unclear transitions and no wrap-up.
+     * Repeated re-opening of settled topics.
+
+6. **Signal-to-Noise Ratio (SNR) (Weight 10%):**
+   - **What it measures:** Efficiency and focus of conversation.
+   - **Scoring Rubric:**
+     * **10:** High density of useful content; low repetition/filler.
+   - **Penalties:**
+     * Repeated points, lengthy side chats.
+     * Excessive filler, long pauses, unproductive back-and-forth.
+
+7. **Time Management (Weight 15% - STICK TO RULES):**
+   - **What it measures:** Adherence to the scheduled duration.
+   - **CRITICAL RULE:** Check the "Time Status" in the metadata.
+   - **Scoring Rubric:**
+     * **10:** Status is ON TIME or EARLY.
+     * **8:** Overrun by < 5 minutes.
+     * **5:** Overrun by 5-15 minutes.
+     * **0:** Overrun by > 15 minutes.
+
+**Generate Qualitative Lists:**
+   - **positive_aspects:** List 2-3 specific items where the meeting had clear wins. **RULE:** Keep each item extremely concise (max 6-8 words). Do NOT use the term 'SNR'. (e.g., 'Clear owners assigned', 'Discussion remained highly focused').
+   - **areas_for_improvement:** List 2-3 specific items where the meeting showed issues. **RULE:** Keep each item extremely concise (max 6-8 words). Do NOT use the term 'SNR'. (e.g., 'Excessive repetition', 'Circular discussions', 'Too much side-talk').
+
+{{metadata}}
+Transcript:
+{{transcript_block}}
+"""
+
 class CallAnalysisAgent:
     """
     Minimal call analysis agent inspired by PainPointAgent:
@@ -38,8 +183,6 @@ class CallAnalysisAgent:
       - requests STRICT JSON from the LLM
       - parses/validates into MeetingAnalysis
     """
-
-    MAX_TURNS_IN_PROMPT = 500
 
     def __init__(self, llm=None) -> None:
         self.llm = llm or llm_client
@@ -61,14 +204,19 @@ class CallAnalysisAgent:
             raise CallAnalysisAgentError("tenant_id and session_id are required.")
 
         transcript = self._to_transcript(transcript_payload, tenant_id, session_id)
+        logger.info(f"DEBUG: Transcript has {len(transcript.conversation)} turns.")
         talk_time_stats = self._compute_talk_time(transcript)
         
         # FIX 1: Process sentiment data from the transcript payload
         sentiment = self._process_sentiment(transcript_payload)
         
-        prompt = self._build_prompt(transcript, talk_time_stats)
+        prompt = self._build_prompt(transcript, talk_time_stats, context=ctx)
         raw = await self._call_llm(prompt)
+        print("DEBUG: Raw LLM Response:", raw)
         payload = self._parse_response(raw)
+        print("DEBUG: Parsed Payload keys:", payload.keys())
+        if "call_scoring" in payload:
+            print("DEBUG: call_scoring content:", payload["call_scoring"])
 
         analysis = self._build_analysis(
             payload=payload,
@@ -208,10 +356,12 @@ class CallAnalysisAgent:
         """Processes sentiment data from the raw transcript payload."""
         sentiments = payload.get("sentiments", {})
         
-        # 1. Get overall sentiment
+        # 1. Get initial overall sentiment from payload
         overall = SentimentLabel.neutral
         try:
-            overall = SentimentLabel(sentiments.get("overall", "neutral"))
+            overall_str = sentiments.get("overall", "neutral")
+            if overall_str:
+                overall = SentimentLabel(overall_str.lower())
         except ValueError:
             logger.warning(f"[CallAnalysisAgent] Invalid overall sentiment label: {sentiments.get('overall')}")
         
@@ -220,115 +370,123 @@ class CallAnalysisAgent:
         
         # First, try the 'participant' list from sentiments
         participants = sentiments.get("participant", [])
-        logger.info(f"[CallAnalysisAgent] Found {len(participants)} participants in sentiments.participant")
         for p in participants:
             name = (p.get("name") or "").strip()
-            sentiment_str = (p.get("sentiment") or "neutral").strip()
+            sentiment_str = (p.get("sentiment") or "neutral").strip().lower()
             if name:
                 try:
                     per_speaker[name] = SentimentLabel(sentiment_str)
-                    logger.info(f"[CallAnalysisAgent] Added sentiment from participant: {name} = {sentiment_str}")
                 except ValueError:
-                    logger.warning(f"[CallAnalysisAgent] Invalid sentiment label for {name}: {sentiment_str}")
                     per_speaker[name] = SentimentLabel.neutral
         
         # Second, try the 'speakers' array from the payload root (new format)
         speakers = payload.get("speakers", [])
-        logger.info(f"[CallAnalysisAgent] Found {len(speakers)} speakers in payload.speakers")
         for speaker_data in speakers:
             name = (speaker_data.get("speaker") or "").strip()
-            sentiment_str = (speaker_data.get("sentiment") or "neutral").strip()
+            sentiment_str = (speaker_data.get("sentiment") or "neutral").strip().lower()
             if name:
                 try:
+                    # Update or add sentiment
                     per_speaker[name] = SentimentLabel(sentiment_str)
-                    logger.info(f"[CallAnalysisAgent] Added sentiment from speaker: {name} = {sentiment_str}")
                 except ValueError:
-                    logger.warning(f"[CallAnalysisAgent] Invalid sentiment label for {name}: {sentiment_str}")
-                    per_speaker[name] = SentimentLabel.neutral
+                    if name not in per_speaker:
+                        per_speaker[name] = SentimentLabel.neutral
 
-        logger.info(f"[CallAnalysisAgent] Final per_speaker sentiment count: {len(per_speaker)}")
+        # 3. Calculate calculated overall sentiment if payload's overall is neutral
+        if overall == SentimentLabel.neutral and per_speaker:
+            sentiment_values = {
+                SentimentLabel.positive: 1,
+                SentimentLabel.neutral: 0,
+                SentimentLabel.negative: -1,
+                SentimentLabel.mixed: 0
+            }
+            
+            total_val = 0
+            count = 0
+            for s_label in per_speaker.values():
+                total_val += sentiment_values.get(s_label, 0)
+                count += 1
+            
+            if count > 0:
+                avg = total_val / count
+                if avg > 0.33:
+                    overall = SentimentLabel.positive
+                elif avg < -0.33:
+                    overall = SentimentLabel.negative
+                else:
+                    overall = SentimentLabel.neutral
+                
+                logger.info(f"[CallAnalysisAgent] Calculated overall sentiment from {count} speakers: {overall} (avg: {avg:.2f})")
+
         return SentimentOverview(overall=overall, per_speaker=per_speaker)
 
 
     # ------------------------------------------------------------------
     # Prompt / LLM
     # ------------------------------------------------------------------
-    def _build_prompt(self, transcript: MeetingTranscript, stats: List[TalkTimeStat]) -> str:
+    def _build_prompt(self, transcript: MeetingTranscript, stats: List[TalkTimeStat], context: Dict[str, Any] = None) -> str:
         participants = ", ".join(p.name for p in transcript.participants) or "Unknown participants"
         talk_time_lines = "\n".join(
             f"{s.speaker}: {s.total_duration} ({s.share_percent}%), turns={s.turns}"
             for s in stats
         )
 
-        header = (
-            "You are a senior meeting analyst. Read the full transcript and produce a single JSON object.\n"
-            "STRICT OUTPUT CONTRACT (one object, no comments, no markdown):\n"
-            "{\n"
-            '  "summary": string,\n'
-            '  "key_points": [string],\n'
-            '  "decisions": [{"title": string, "owner": string|null, "due_date": string|null, "references": [{"start": "HH:MM:SS", "end": "HH:MM:SS"}]}],\n'
-            '  "action_items": [{"task": string, "owner": string|null, "due_date": string|null, "priority": string|null, "references": [{"start": "HH:MM:SS", "end": "HH:MM:SS"}]}],\n'
-            '  "call_scoring": {\n'
-            '    "score": number (0-10),\n'
-            '    "grade": string (A, B, C, D, F),\n'
-            '    "reasons": [{"reason": string, "reference": {"start": "HH:MM:SS", "end": "HH:MM:SS"}}],\n'
-            '    "summary": string\n'
-            '  }\n'
-            "}\n\n"
-            "QUALITY RULES AND FIELD DEFINITIONS:\n"
-            "1. **MUTUALLY EXCLUSIVE:** An item CANNOT be both a Decision and an Action Item. You must choose the single best category.\n"
-            "2. **DECISION:** A final **outcome**, **approval**, **agreement**, or **policy change** made during the meeting. It is a STATE CHANGE. (e.g., 'Budget Approved', 'Hiring Freeze Lifted', 'Vendor X Selected').\n"
-            "2. **ACTION ITEM:** A specific **task**, **to-do**, or **deliverable** assigned for FUTURE execution. Any task or actionable follow-up that mentions an owner name or a time/due-date must be captured as an action item.\n"
-            "3. **Summary:** A comprehensive, high-level overview (5-8 crisp sentences) covering the main **purpose/goals**, the final **outcomes**, and any major **follow-up** steps.\n"
-            "4. **Key Points:** Specific, factual, bullet-style highlights (strings) of significant **progress**, **blockers**, **metrics**, or **updates** discussed.\n"
-            "5. **REFERENCES:** All decisions and action_items MUST include time-based references in HH:MM:SS format (e.g., {\"start\": \"00:05:32\", \"end\": \"00:06:15\"}). Use timestamps from the transcript directly.\n"
-            "6. Use null (not empty string) for unknown owner/due_date/priority fields.\n"
-            "7. Use [] for empty arrays; never use null or omit required keys.\n"
-            "8. Output MUST be valid JSON — no code fences, trailing commas, extra keys, or explanatory text.\n\n"
-            
-            "CALL SCORING (PRODUCTION-GRADE CALCULATION):\n"
-            "The final `score` (0-10) and `grade` must be rigorously calculated based on the completeness and quality of the extracted Decisions and Action Items.\n\n"
-            
-            "STEP 1: Calculate the 5 component scores (0-10) by assessing all *extracted* decisions and action items against these criteria:\n"
-            "  - **Action Item Completeness (30% weight):** Are action items clear, specific, and detailed?\n"
-            "  - **Owner Assignment Clarity (20% weight):** Are clear owners assigned to all major decisions and actions?\n"
-            "  - **Due Date Quality (20% weight):** Are specific, realistic due dates present for actions/decisions?\n"
-            "  - **Meeting Structure & Decision Flow (20% weight):** Is the meeting flow productive, leading to clear decisions and not circular discussion?\n"
-            "  - **Signal vs Noise Ratio (10% weight):** Was the discussion focused and efficient?\n\n"
-            
-            "STEP 2: Use the following weighted average formula to determine the final `score`:\n"
-            "score = (0.30 * Action Completeness) + (0.20 * Owner Clarity) + \n"
-            "      (0.20 * Due Date Quality) + (0.20 * Structure) + \n"
-            "      (0.10 * Signal/Noise)\n\n"
-            
-            "STEP 3: Map the final score to the appropriate, **simplified** `grade`:\n"
-            "A: 8.5-10.0 (Excellent),\n"
-            "B: 7.0-8.4 (Good),\n"
-            "C: 5.5-6.9 (Acceptable),\n"
-            "D: 4.0-5.4 (Poor),\n"
-            "F: 0.0-3.9 (Unacceptable)\n\n"
-            
-            "STEP 4: Generate 3-5 high-impact `reasons` supporting the score. **CRITICAL:** Each reason must be a **professional, insight-driven summary** (2-4 words).\n"
-            "  - **POSITIVE EXAMPLES:** 'Clear Ownership Assigned', 'Detailed Action Plan', 'Productive Decision Flow', 'Strong Focus'.\n"
-            "  - **NEGATIVE EXAMPLES:** 'Vague Timelines', 'Undefined Responsibilities', 'Circular Discussion', 'Missing Follow-up'.\n"
-            "  - **AVOID:** Generic phrases like 'Good Structure', 'Bad Score', 'Nice Meeting'.\n"
-        )
+        ctx = context or {}
+        meeting_title = ctx.get("meeting_title") or "Unknown Meeting"
+        start_time = ctx.get("start_time") or "N/A"
+        end_time = ctx.get("end_time") or "N/A"
 
+        # Calculate Time Status
+        scheduled_val = 0.0
+        if start_time and end_time:
+            # Assume datetime objects or parse strings if needed
+            try:
+                if isinstance(start_time, str):
+                    s_dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+                    e_dt = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
+                    scheduled_val = (e_dt - s_dt).total_seconds()
+                else:
+                    scheduled_val = (end_time - start_time).total_seconds()
+            except Exception:
+                scheduled_val = 0.0
+
+        # Estimate actual duration from last turn or use approximate
+        actual_val = 0.0
+        if transcript.conversation:
+            last_turn = transcript.conversation[-1]
+            actual_val = self._hhmmss_to_seconds(last_turn.end_time)
+
+        status_msg = "UNKNOWN (Timestamps missing)"
+        if scheduled_val > 0 and actual_val > 0:
+            diff = actual_val - scheduled_val
+            if diff > 300: # 5 mins buffer
+                overrun_mins = int(diff / 60)
+                status_msg = f"OVERRUN by {overrun_mins} minutes."
+            elif diff < -300:
+                early_mins = int(abs(diff) / 60)
+                status_msg = f"ENDED EARLY by {early_mins} minutes."
+            else:
+                status_msg = "ON TIME"
+        
         metadata = (
             f"Tenant: {transcript.tenant_id}\n"
             f"Session: {transcript.session_id}\n"
+            f"Title: {meeting_title}\n"
+            f"Start Time: {start_time}\n"
+            f"End Time: {end_time}\n"
+            f"Time Status: {status_msg}\n"
             f"Participants: {participants}\n"
             f"Talk time:\n{talk_time_lines or 'No speech recorded.'}\n"
         )
 
         convo_lines: List[str] = []
-        for idx, turn in enumerate(transcript.conversation[: self.MAX_TURNS_IN_PROMPT]):
+        for idx, turn in enumerate(transcript.conversation):
             start_ts = self._format_timestamp(turn.start_time)
             end_ts = self._format_timestamp(turn.end_time)
             convo_lines.append(f"[{idx}] [{start_ts} - {end_ts}] {turn.speaker}: {turn.text}")
 
         transcript_block = "\n".join(convo_lines)
-        return f"{header}\n{metadata}\nTranscript:\n{transcript_block}"
+        return CALL_ANALYSIS_PROMPT_TEMPLATE.replace("{{metadata}}", metadata).replace("{{transcript_block}}", transcript_block)
 
     async def _call_llm(self, prompt: str) -> str:
         logger.info("[CallAnalysisAgent] Starting LLM call")
@@ -420,8 +578,63 @@ class CallAnalysisAgent:
             transcript_language=transcript.language,
             duration=duration_hhmmss,
             metadata=self._build_metadata(payload.get("metadata"), context),
+            is_overtime=self._check_overtime(context, transcript),
+            overtime_duration=self._get_overtime_duration(context, transcript),
         )
         return analysis
+
+    def _check_overtime(self, context: Dict[str, Any], transcript: MeetingTranscript) -> bool:
+        try:
+            start_time = context.get("start_time")
+            end_time = context.get("end_time")
+            if not start_time or not end_time:
+                return False
+                
+            if isinstance(start_time, str):
+                s_dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+                e_dt = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
+                scheduled = (e_dt - s_dt).total_seconds()
+            else:
+                scheduled = (end_time - start_time).total_seconds()
+
+            actual = 0.0
+            if transcript.conversation:
+                actual = self._hhmmss_to_seconds(transcript.conversation[-1].end_time)
+            
+            print(f"DEBUG: Overtime Check - Actual: {actual}s, Scheduled: {scheduled}s")
+            logger.info(f"DEBUG: Overtime Check - Actual: {actual}s, Scheduled: {scheduled}s")
+            return actual > (scheduled + 300) # 5 min buffer
+        except Exception as e:
+            logger.info(f"DEBUG: Overtime Check Error: {e}")
+            return False
+
+    def _get_overtime_duration(self, context: Dict[str, Any], transcript: MeetingTranscript) -> str:
+        try:
+            start_time = context.get("start_time")
+            end_time = context.get("end_time")
+            if not start_time or not end_time:
+                return "0 min"
+
+            if isinstance(start_time, str):
+                s_dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+                e_dt = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
+                scheduled = (e_dt - s_dt).total_seconds()
+            else:
+                scheduled = (end_time - start_time).total_seconds()
+
+            actual = 0.0
+            if transcript.conversation:
+                actual = self._hhmmss_to_seconds(transcript.conversation[-1].end_time)
+            
+            diff = actual - scheduled
+            if diff > 0:
+                mins = int(diff / 60)
+                logger.info(f"DEBUG: Overtime Duration: {mins} min")
+                return f"{mins} min"
+            return "0 min"
+        except Exception as e:
+            logger.info(f"DEBUG: Overtime Duration Error: {e}")
+            return "0 min"
 
     def _build_metadata(
         self,
@@ -523,88 +736,58 @@ class CallAnalysisAgent:
             return stripped or None
         return str(value)
 
-    def _calculate_grade(self, score: float) -> str:
-        """Map score to the simplified grade based on prompt definition."""
-        if score >= 8.5:
-            return "A"
-        elif score >= 7.0:
-            return "B"
-        elif score >= 5.5:
-            return "C"
-        elif score >= 4.0:
-            return "D"
-        else:
-            return "F"
-    
-    def _build_scoring_reasons(self, value: Any) -> List[ScoringReason]:
-        """Build scoring reasons list, ensuring reference times are extracted."""
-        reasons: List[ScoringReason] = []
-        if not isinstance(value, Iterable):
-            return reasons
-        
-        for entry in value:
-            if not isinstance(entry, dict):
-                continue
-            reason_text = (entry.get("reason") or "").strip()
-            if not reason_text:
-                continue
-            
-            reference = entry.get("reference", {})
-            start = self._clean_optional(reference.get("start"))
-            end = self._clean_optional(reference.get("end"))
-            
-            reasons.append(
-                ScoringReason(
-                    reason=reason_text,
-                    reference={
-                        "start": start,
-                        "end": end,
-                    }
-                )
-            )
-        return reasons
-    
     def _build_call_scoring(self, value: Any) -> Optional[CallScoring]:
         """
         Build call scoring object from LLM response.
-        Uses the LLM's final 'score' and calculates the individual component
-        scores as proxies to satisfy the Pydantic CallScoring model.
+        Calculates the final weighted score from the 6 components extracted from LLM.
         """
         if not isinstance(value, dict):
             return None
         
         try:
-            raw_score = float(value.get("score", 0.0))
+            # Extract inferred agenda (chain of thought)
+            identified_agenda = (value.get("identified_agenda") or "Agenda not detected").strip()
             
-            # Use raw_score as a proxy for the individual component scores
-            proxy_score = raw_score if 0.0 <= raw_score <= 10.0 else 5.0
+            # Extract 7 raw component scores (0-10)
+            agenda_score = float(value.get("agenda_deviation", 0.0))
+            action_score = float(value.get("action_completeness", 0.0))
+            owner_score = float(value.get("owner_clarity", 0.0))
+            due_date_score = float(value.get("due_date_quality", 0.0))
+            structure_score = float(value.get("structure", 0.0))
+            snr_score = float(value.get("snr", 0.0))
+            time_score = float(value.get("time_management_score", 0.0))
             
-            action_item_score = proxy_score
-            owner_clarity_score = proxy_score
-            due_date_score = proxy_score
-            structure_score = proxy_score
-            signal_noise_score = proxy_score
+            # Calculate Final Score
+            # Formula (Sum=1.0): 
+            # 15% Agenda + 20% Action + 15% Owner + 10% DueDate + 15% Structure + 10% SNR + 15% Time
+            final_score = (
+                (0.15 * agenda_score) +
+                (0.20 * action_score) +
+                (0.15 * owner_score) +
+                (0.10 * due_date_score) +
+                (0.15 * structure_score) +
+                (0.10 * snr_score) +
+                (0.15 * time_score)
+            )
             
-            final_score = proxy_score
+            # Clamp to 0-10 just in case
+            final_score = max(0.0, min(10.0, final_score))
+            
+            positive_list = self._ensure_str_list(value.get("positive_aspects", []))
+            improvement_list = self._ensure_str_list(value.get("areas_for_improvement", value.get("negative_aspects", [])))
 
-            grade = (value.get("grade") or "F").strip()
-            summary = (value.get("summary") or "").strip()
-            reasons = self._build_scoring_reasons(value.get("reasons", []))
-            
-            # Recalculate grade based on the simplified scale
-            if not grade:
-                grade = self._calculate_grade(final_score)
-            
             return CallScoring(
-                score=round(final_score, 2),
-                grade=grade,
-                reasons=reasons,
-                summary=summary or "Meeting quality assessment completed.",
-                action_item_completeness_score=round(action_item_score, 2),
-                owner_clarity_score=round(owner_clarity_score, 2),
+                score=round(final_score, 2), 
+                identified_agenda=identified_agenda,
+                agenda_deviation_score=round(agenda_score, 2),
+                action_item_completeness_score=round(action_score, 2),
+                owner_clarity_score=round(owner_score, 2),
                 due_date_quality_score=round(due_date_score, 2),
                 meeting_structure_score=round(structure_score, 2),
-                signal_noise_ratio_score=round(signal_noise_score, 2)
+                signal_noise_ratio_score=round(snr_score, 2),
+                time_management_score=float(value.get("time_management_score", 0)),
+                positive_aspects=positive_list,
+                areas_for_improvement=improvement_list,
             )
         except (TypeError, ValueError, ValidationError) as e:
             logger.warning("[CallAnalysisAgent] Failed to build CallScoring: %s", e)
