@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     
     DEFAULT_LLM_PROVIDER: str = Field(default="gemini", env="DEFAULT_LLM_PROVIDER")
     DEFAULT_LLM_MODEL: str = Field(default="gemini-2.5-flash", env="DEFAULT_LLM_MODEL")
+    # Supports: model names (gemini-2.5-flash), provider names (gemini), or mixed
+    LLM_FALLBACK_CHAIN: str = Field(default="gemini-2.5-flash,gpt-4o,azure", env="LLM_FALLBACK_CHAIN")
+    LLM_TIMEOUT: float = Field(default=1200.0, env="LLM_TIMEOUT")
+    LLM_MAX_RETRIES: int = Field(default=3, env="LLM_MAX_RETRIES")
     
     OPENAI_API_KEY: Optional[str] = Field(default=None, env="OPENAI_API_KEY")
     WHISPER_MODEL_SIZE: str = Field(default="tiny", env="WHISPER_MODEL_SIZE")
