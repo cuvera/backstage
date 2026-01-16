@@ -1,21 +1,27 @@
 from typing import Any, Dict, List, Optional
 from .base import BaseAnalysisAgent
 
-DECISION_SYSTEM_INSTRUCTION = """You are a Corporate Governance Auditor. Your task is to extract 'Strategic Decisions' from meeting transcripts.
+DECISION_SYSTEM_INSTRUCTION = """You are a Project Governance Officer. Your task is to extract all definitive decisions and agreements reached during a meeting.
 
-### THE STRATEGIC GATE:
-- **DEFINITION**: A decision is a commitment to a specific course of action, a strategic state change, or a final approval.
-- **EXCLUSIONS**: Non-decisions include: "Let's meet again," "We should look into X," or "I'll think about it."
-- **TITLE REQUIREMENT**: Titles must be self-contained (15-25 words), explaining the decision AND its intended impact.
-- **OUTPUT**: Valid JSON."""
+### CORE OPERATING PRINCIPLES:
+- **Comprehensive Capture**: Extract any point where a choice was made or an agreement was reached.
+- **Clarity**: Titles should be specific and clear.
+- **Evidence**: Every decision must be linked to its HH:MM:SS timestamps.
+- **Output**: Valid JSON."""
 
-DECISION_TASK_PROMPT = """Analyze the provided meeting transcript segments to identify strategic decisions.
+DECISION_TASK_PROMPT = """Analyze the provided meeting transcript segments to extract all definitive decisions.
 
-### ANALYSIS PROCESS:
-1. **Source Check**: The input may be pre-filtered for clusters of type 'decision'. Verify if these content blocks contain actual commitments.
-2. **Impact Assessment**: Only capture items that change the project's direction or resolve a previously open question.
-3. **Draft Title**: Create a comprehensive title (e.g., "Approval of [Component X] architecture to mitigate [Risk Y] and ensure [Goal Z]").
-4. **Reference Alignment**: Map the decision to the exact HH:MM:SS timestamps from the transcript.
+### INPUT FORMAT:
+The transcript is organized into V2 blocks:
+`--- TOPIC: [Name] (Type: [actionable_item/decision/key_insight/discussion/question]) ---`
+
+### EXTRACTION RULES:
+1. **Decision Segments**: Prioritize blocks where the type is 'decision'.
+2. **Definitive Agreements**: Identify statements where the group agrees on a path forward, a policy, a feature, or a change.
+3. **Capture Details**:
+   - **Title**: A clear, descriptive title of what was decided.
+   - **Owner**: The person or team responsible for the decision or its execution.
+   - **References**: Exact HH:MM:SS timestamps from the transcript.
 
 ### INPUT DATA:
 Metadata: {{metadata}}
@@ -26,8 +32,8 @@ Output ONLY a JSON object:
 {
   "decisions": [
     {
-      "title": "Comprehensive 15-25 word strategic title",
-      "owner": "Directly named owner or null",
+      "title": "Clear description of the decision",
+      "owner": "Who is responsible or null",
       "due_date": null,
       "references": [{"start": "HH:MM:SS", "end": "HH:MM:SS"}]
     }

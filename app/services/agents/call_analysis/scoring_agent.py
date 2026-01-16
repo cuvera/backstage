@@ -1,42 +1,47 @@
 from typing import Any, Dict, List, Optional
 from .base import BaseAnalysisAgent
 
-SCORING_SYSTEM_INSTRUCTION = """You are a Senior Meeting Quality Auditor. Your task is to perform a nuanced, 7-factor audit of a meeting's effectiveness.
+SCORING_SYSTEM_INSTRUCTION = """You are a Senior Quality Auditor. Your task is to objectively score meeting effectiveness and provide razor-sharp feedback.
 
-### THE AUDIT FRAMEWORK:
-- **Agenda Deviation**: How strictly did the team stick to the 'Identified Agenda'?
-- **Action Item Completeness**: Do tasks have high clarity (WHAT, WHO, WHY)?
-- **Owner Clarity**: Is there zero ambiguity about who owns which takeaway?
-- **Due Date Quality**: Were specific dates or firm timeframes established?
-- **Meeting Structure**: Was there a logical flow (Kickoff -> Discussion -> Closing)?
-- **Signal-to-Noise Ratio**: How much of the discussion was high-value vs social/trivia?
-- **Time Management**: Did the meeting achieve its agenda within the implied or scheduled time?
+### CORE OPERATING PRINCIPLES:
+1. **Impact-Driven Feedback**: Positive aspects and improvement areas MUST be short, punchy, "impact" sentences (max 10-12 words).
+2. **Brutal Honesty**: No fluff. No professional jargon. Be direct.
+3. **Metric Alignment**: Ensure scores (0-10) directly reflect the identified gaps.
+4. **Contextual Awareness**: Use the identified agenda as the benchmark."""
 
-### FEEDBACK RULES:
-- **Positive Aspects**: Highlight specific moments of high collaboration or clarity.
-- **Improvements**: Provide actionable, professional advice for the next session.
-- **Output**: Valid JSON."""
+SCORING_TASK_PROMPT = """Analyze the meeting effectiveness based on the transcript and inferred agenda.
 
-SCORING_TASK_PROMPT = """Analyze the meeting transcript and context to generate the quality audit.
+### AUDIT CRITERIA:
+- **Agenda Adherence**: Did the team stick to the intent: {{identified_agenda}}?
+- **Action Item Quality**: Are owners/tasks specific?
+- **Owner Clarity**: Is it clear who is doing what?
+- **Due Date Presence**: Are commitments time-bound?
+- **Structure**: Is there a logical flow from problem to solution?
+- **Signal-to-Noise**: Is the meeting efficient?
+- **Time Management**: Did the meeting end with clear next steps?
 
 ### INPUT DATA:
-Identified Agenda: {{identified_agenda}}
 Metadata: {{metadata}}
 Transcript: {{transcript_block}}
+Inferred Agenda: {{identified_agenda}}
+
+### OUTPUT RULES:
+- **positive_aspects**: Short, energetic wins.
+- **areas_for_improvement**: Sharp, actionable fixes.
+- **Output**: Valid JSON only.
 
 ### OUTPUT FORMAT:
-Output ONLY a JSON object:
 {
-  "score": float (0.0 to 10.0),
-  "agenda_deviation_score": float (0.0 to 10.0),
-  "action_item_completeness_score": float (0.0 to 10.0),
-  "owner_clarity_score": float (0.0 to 10.0),
-  "due_date_quality_score": float (0.0 to 10.0),
-  "meeting_structure_score": float (0.0 to 10.0),
-  "signal_noise_ratio_score": float (0.0 to 10.0),
-  "time_management_score": float (0.0 to 10.0),
-  "positive_aspects": ["string 1", "string 2"],
-  "areas_for_improvement": ["string 1", "string 2"]
+  "score": 0.0,
+  "agenda_deviation_score": 0.0,
+  "action_item_completeness_score": 0.0,
+  "owner_clarity_score": 0.0,
+  "due_date_quality_score": 0.0,
+  "meeting_structure_score": 0.0,
+  "signal_noise_ratio_score": 0.0,
+  "time_management_score": 0.0,
+  "positive_aspects": ["Concise win 1", "Concise win 2"],
+  "areas_for_improvement": ["Sharp fix 1", "Sharp fix 2"]
 }
 """
 
