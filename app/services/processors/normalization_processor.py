@@ -44,28 +44,29 @@ class NormalizationProcessor:
 
         logger.info(f"[Normalization] Starting normalization with {original_count} segments")
 
-        # Step 1: Remove duplicates
+        # Step 1: Reorder by timestamp FIRST (handle out-of-order data)
+        segments = self._reorder_segments(segments)
+        logger.info(f"[Normalization] After reordering: {len(segments)} segments")
+
+        # Step 2: Remove duplicates
         segments = self._remove_duplicates(segments, options)
         logger.info(f"[Normalization] After duplicate removal: {len(segments)} segments")
 
-        # Step 2: Resolve overlaps
-        segments = self._resolve_overlaps(segments)
-        logger.info(f"[Normalization] After overlap resolution: {len(segments)} segments")
+        # Step 3: Resolve overlaps (DISABLED - was creating invalid timestamps)
+        # segments = self._resolve_overlaps(segments)
+        # logger.info(f"[Normalization] After overlap resolution: {len(segments)} segments")
 
-        # Step 3: Merge fragments
+        # Step 4: Merge fragments
         segments = self._merge_fragments(segments, options)
         logger.info(f"[Normalization] After fragment merging: {len(segments)} segments")
 
-        # Step 4: Normalize speaker names
+        # Step 5: Normalize speaker names
         segments = self._normalize_speaker_names(segments)
         logger.info(f"[Normalization] After speaker normalization: {len(segments)} segments")
 
-        # Step 5: Cleanup text
+        # Step 6: Cleanup text
         segments = self._cleanup_text(segments, options)
         logger.info(f"[Normalization] After text cleanup: {len(segments)} segments")
-
-        # Step 6: Reorder by timestamp
-        segments = self._reorder_segments(segments)
 
         # Step 7: Validate timestamps
         segments = self._validate_timestamps(segments)
@@ -74,6 +75,11 @@ class NormalizationProcessor:
             f"[Normalization] Completed: {original_count} → {len(segments)} segments "
             f"({original_count - len(segments)} removed)"
         )
+
+        # write segments to a json file
+        import json
+        with open("normalized_segments.json", "w") as f:
+            json.dump(segments, f, indent=4)
 
         return {
             "transcriptions": segments,
@@ -302,7 +308,8 @@ class NormalizationProcessor:
 
     def _validate_timestamps(self, segments: List[Dict]) -> List[Dict]:
         """
-        Validate timestamp integrity (start < end, no negative times).
+        Validate timestamp integrity (start <= end, no negative times).
+        Allows start == end for single-word utterances.
         """
         valid = []
 
@@ -310,8 +317,8 @@ class NormalizationProcessor:
             start = segment.get("start", 0)
             end = segment.get("end", 0)
 
-            # Skip invalid timestamps
-            if start < 0 or end < 0 or start >= end:
+            # Skip invalid timestamps (allow start == end for quick utterances)
+            if start < 0 or end < 0 or start > end:
                 logger.warning(
                     f"[Normalization] Invalid timestamps in segment {segment.get('segment_id', '')}: "
                     f"start={start}, end={end}"

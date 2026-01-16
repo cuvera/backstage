@@ -93,12 +93,14 @@ class SegmentClassificationProcessor:
         Returns:
             List of cluster definitions
         """
-        # Build segment text with references
-        segment_list = self._build_segment_list(segments)
+        # Log available segment_ids for debugging
+        segment_ids_available = [seg.get("segment_id") for seg in segments]
+        logger.info(f"[Classification] Available segment_ids: {len(segment_ids_available)} segments")
+        logger.debug(f"[Classification] Segment IDs: {segment_ids_available[:20]}... (showing first 20)")
 
         # Build classification prompt
         system_prompt = self._build_system_prompt()
-        user_prompt = self._build_user_prompt(segment_list)
+        user_prompt = self._build_user_prompt(segments)
 
         messages = [
             {"role": "system", "content": system_prompt},
@@ -106,9 +108,11 @@ class SegmentClassificationProcessor:
         ]
 
         # Get provider chain from options (defaults to config chain)
-        provider_chain = options.get("provider_chain")
         temperature = options.get("temperature", 0.0)
-        max_tokens = options.get("max_tokens", 20480)
+
+        provider_chain = options.get("provider_chain")
+        if provider_chain is None:
+            provider_chain = self.llm_client._default_provider_chain()
 
         try:
             # Use enhanced LLM client with fallback support
@@ -116,9 +120,10 @@ class SegmentClassificationProcessor:
                 messages=messages,
                 provider_chain=provider_chain,
                 temperature=temperature,
-                max_tokens=max_tokens,
                 response_format={"type": "json_object"}
             )
+
+            logger.info(f"[Classification] Received LLM response: {len(response_text)} characters")
 
             # Parse JSON response
             response_data = json.loads(response_text)
@@ -126,33 +131,47 @@ class SegmentClassificationProcessor:
 
             logger.info(f"[Classification] LLM returned {len(clusters)} clusters")
 
+            # Log segment_ids returned by LLM for debugging
+            llm_segment_ids = set()
+            for cluster in clusters:
+                seg_ids = cluster.get("segment_ids", [])
+                llm_segment_ids.update(seg_ids)
+
+            logger.debug(f"[Classification] LLM returned segment_ids: {sorted(llm_segment_ids)[:30]}... (showing first 30)")
+
+            # Check for segment_ids not in available set
+            invalid_ids = llm_segment_ids - set(segment_ids_available)
+            if invalid_ids:
+                logger.warning(f"[Classification] LLM returned {len(invalid_ids)} invalid segment_ids not in normalized transcript: {sorted(invalid_ids)[:20]}")
+
             return clusters
 
         except json.JSONDecodeError as e:
             logger.error(f"[Classification] Failed to parse LLM response: {e}")
+            logger.error(f"[Classification] Response length: {len(response_text)} characters")
+
+            # Dump response to file for debugging
+            try:
+                import os
+                os.makedirs("data/debug", exist_ok=True)
+                debug_file = f"data/debug/llm_response_error_{hash(response_text) % 100000}.txt"
+                with open(debug_file, "w") as f:
+                    f.write("=== LLM RESPONSE (FAILED TO PARSE) ===\n\n")
+                    f.write(response_text)
+                    f.write(f"\n\n=== ERROR ===\n{e}")
+                logger.error(f"[Classification] Dumped response to: {debug_file}")
+            except Exception as dump_error:
+                logger.error(f"[Classification] Failed to dump response: {dump_error}")
+
+            # Log first and last 500 chars for quick inspection
+            logger.error(f"[Classification] Response start: {response_text[:500]}")
+            logger.error(f"[Classification] Response end: {response_text[-500:]}")
+
             return []
 
         except Exception as e:
             logger.error(f"[Classification] LLM call failed: {e}")
             return []
-
-    def _build_segment_list(self, segments: List[Dict]) -> str:
-        """
-        Build formatted segment list for LLM prompt.
-        """
-        lines = []
-
-        for i, seg in enumerate(segments, 1):
-            segment_id = seg.get("segment_id", f"seg_{i}")
-            speaker = seg.get("speaker", "Unknown")
-            text = seg.get("text", "")
-            start = seg.get("start", 0)
-
-            lines.append(
-                f"{i}. [{segment_id}] ({start:.1f}s) {speaker}: {text}"
-            )
-
-        return "\n".join(lines)
 
     def _build_system_prompt(self) -> str:
         """
@@ -160,11 +179,15 @@ class SegmentClassificationProcessor:
         """
         return SEGMENT_CLASSIFICATION_PROMPT
 
-    def _build_user_prompt(self, segment_list: str) -> str:
+    def _build_user_prompt(self, segments: List[Dict]) -> str:
         """
-        Build user prompt with segment list.
+        Build user prompt with segments as JSON.
         """
         return f"""Analyze the following meeting segments and classify them into clusters.
-        **Meeting Segments:**
-        {segment_list}
-        """
+
+**Meeting Segments:**
+```json
+{json.dumps(segments, indent=2)}
+```
+
+Use the segment_id values from the JSON above in your cluster definitions."""

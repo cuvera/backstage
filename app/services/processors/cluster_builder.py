@@ -18,6 +18,13 @@ class ClusterBuilder:
     Builds final segment classification structure from LLM cluster definitions.
     """
 
+    @staticmethod
+    def _seconds_to_mmss(seconds: float) -> str:
+        """Convert seconds to MM:SS format."""
+        minutes = int(seconds // 60)
+        secs = int(seconds % 60)
+        return f"{minutes:02d}:{secs:02d}"
+
     def build_clusters(
         self,
         cluster_definitions: List[Dict[str, Any]],
@@ -49,15 +56,15 @@ class ClusterBuilder:
         # Build clusters with full details
         clusters = []
 
-        for cluster_def in cluster_definitions:
-            cluster = self._build_single_cluster(cluster_def, segment_map)
+        for idx, cluster_def in enumerate(cluster_definitions, 1):
+            cluster = self._build_single_cluster(cluster_def, segment_map, idx)
             if cluster:
                 clusters.append(cluster)
 
         logger.info(f"[ClusterBuilder] Built {len(clusters)} clusters successfully")
 
         return {
-            "clusters": clusters,
+            "segments": clusters,
             "metadata": {
                 "total_clusters": len(clusters),
                 "total_segments": len(segments),
@@ -68,7 +75,8 @@ class ClusterBuilder:
     def _build_single_cluster(
         self,
         cluster_def: Dict[str, Any],
-        segment_map: Dict[str, Dict]
+        segment_map: Dict[str, Dict],
+        cluster_id: int
     ) -> Optional[Dict[str, Any]]:
         """
         Build a single cluster with full segment details.
@@ -76,13 +84,39 @@ class ClusterBuilder:
         Args:
             cluster_def: Cluster definition from LLM
             segment_map: Map of segment_id to segment data
+            cluster_id: Sequential cluster ID
 
         Returns:
             Cluster with full details or None if invalid
         """
-        segment_ids = cluster_def.get("segment_ids", [])
-        topic = cluster_def.get("topic", "").strip()
-        cluster_type = cluster_def.get("type", "").strip()
+        # Handle segment_ids - should be list
+        segment_ids_raw = cluster_def.get("segment_ids", [])
+        if isinstance(segment_ids_raw, str):
+            # LLM might return single string instead of list
+            segment_ids = [segment_ids_raw]
+            logger.debug(f"[ClusterBuilder] Converted segment_ids string to list: {segment_ids_raw}")
+        elif isinstance(segment_ids_raw, list):
+            segment_ids = segment_ids_raw
+        else:
+            logger.warning(f"[ClusterBuilder] Invalid segment_ids type: {type(segment_ids_raw)}")
+            segment_ids = []
+
+        # Handle topic - should be list
+        topic_raw = cluster_def.get("topic", [])
+        if isinstance(topic_raw, list):
+            topic = topic_raw
+        else:
+            # Convert string to list
+            topic = [str(topic_raw).strip()] if topic_raw else []
+            logger.debug(f"[ClusterBuilder] Converted topic string to list: {topic_raw} → {topic}")
+
+        # Handle type - could be string or list
+        type_raw = cluster_def.get("type", "")
+        if isinstance(type_raw, list):
+            cluster_type = type_raw[0] if type_raw else ""
+            logger.debug(f"[ClusterBuilder] Extracted type from list: {type_raw} → {cluster_type}")
+        else:
+            cluster_type = str(type_raw).strip() if type_raw else ""
 
         if not segment_ids or not topic or not cluster_type:
             logger.warning(
@@ -117,19 +151,25 @@ class ClusterBuilder:
             for seg in segments_data
         ))
 
-        # Build cluster structure
+        # Format transcriptions with MM:SS times
+        transcriptions = []
+        for seg in segments_data:
+            seg_copy = seg.copy()
+            seg_copy["start"] = self._seconds_to_mmss(seg.get("start", 0))
+            seg_copy["end"] = self._seconds_to_mmss(seg.get("end", 0))
+            transcriptions.append(seg_copy)
+
+        # Build cluster structure (flattened with segment_cluster_id)
         cluster = {
+            "segment_cluster_id": cluster_id,
             "topic": topic,
             "type": cluster_type,
-            "segment_ids": segment_ids,
-            "segments": segments_data,
-            "metadata": {
-                "start_time": start_time,
-                "end_time": end_time,
-                "duration": duration,
-                "segment_count": len(segments_data),
-                "speakers": speakers
-            }
+            "start_time": self._seconds_to_mmss(start_time),
+            "end_time": self._seconds_to_mmss(end_time),
+            "duration": self._seconds_to_mmss(duration),
+            "speakers": speakers,
+            "segment_count": len(segments_data),
+            "transcriptions": transcriptions
         }
 
         return cluster
