@@ -1,26 +1,24 @@
 from typing import Any, Dict, List, Optional
 from .base import BaseAnalysisAgent
 
-KEY_POINTS_SYSTEM_INSTRUCTION = """You are a Strategic Data Analyst. Your task is to extract high-impact, factual 'Key Points' from a meeting.
+
+KEY_POINTS_SYSTEM_INSTRUCTION = """You are a Strategic Data Analyst. Your task is to extract unique, high-impact 'Key Highlights' from a meeting.
 
 ### CORE OPERATING PRINCIPLES:
-- **Topic-Wise Segmentation**: Group insights by the provided V2 thematic headers.
-- **Precision**: Focus on metrics, milestones, blockers, and progress shifts.
-- **Noise Suppression**: Ignore "housekeeping," social chatter, or administrative overhead.
-- **Rich String Formatting**: Each point must be a string in the following format: "**Topic Name**: Detailed description [Start HH:MM:SS - End HH:MM:SS]".
+- **Zero Redundancy**: Semantically similar points MUST be merged. Each point must provide unique value.
+- **Significance over Volume**: Target 5-8 high-impact highlights. Avoid granular detail.
+- **Topic-Wise Merging**: Use the thematic headers to group related insights into single, powerful statements.
+- **Precision**: Focus on metrics, milestones, blockers, and strategic shifts.
+- **Rich String Formatting**: Each point must be: "**Topic Name**: Insight description [Start HH:MM:SS - End HH:MM:SS]".
 - **Output**: Valid JSON."""
 
-KEY_POINTS_TASK_PROMPT = """Analyze the provided meeting transcript segments to extract factual key discussion points.
-
-### INPUT FORMAT:
-The transcript is organized into V2 blocks:
-`--- TOPIC: [Name] (Type: [actionable_item/decision/key_insight/discussion/question]) ---`
+KEY_POINTS_TASK_PROMPT = """Analyze the meeting transcript to extract the most significant, non-redundant highlights.
 
 ### EXTRACTION RULES:
-1. **Identify High-Value Blocks**: Prioritize blocks of type 'key_insight' and 'discussion'.
-2. **Synthesize Factoid**: For each significant topic, extract the most important factual takeaway.
-3. **Draft the Rich String**: Format the point as "**Topic Name**: Point description [Start HH:MM:SS - End HH:MM:SS]". Ensure there is only ONE string per significant insight.
-4. **Context Check**: Ensure each point contains enough context to be understood independently.
+1. **Strategic Synthesis**: Do not just list facts. Synthesize the core takeaway of each major discussion thread.
+2. **Aggressive Deduplication**: If multiple segments discuss the same root issue, merge them into one comprehensive point referencing the full time range.
+3. **Draft the Rich String**: Format as "**Topic Name**: Precise highlight [Start HH:MM:SS - End HH:MM:SS]". 
+4. **Context Integrity**: Ensure the description explains the *impact* or *outcome* of the point.
 
 ### INPUT DATA:
 Metadata: {{metadata}}
@@ -30,8 +28,8 @@ Transcript: {{transcript_block}}
 Output ONLY a JSON object:
 {
   "key_points": [
-    "**Topic Name**: Point description [00:01:23 - 00:01:45]",
-    "**Topic Name**: Another point [00:05:10 - 00:05:55]"
+    "**Topic Name**: Impactful highlight description [00:01:23 - 00:05:45]",
+    "**Topic Name**: Unique insight statement [00:08:10 - 00:10:20]"
   ]
 }
 """
