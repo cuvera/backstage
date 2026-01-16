@@ -147,6 +147,7 @@ class TranscriptionV2Service:
 
             return {
                 "status": "completed",
+                "transcription_v2": segment_classifications,
                 "segments": segment_classifications,
                 # "message_id": message_id,
                 "processing_stats": processing_stats

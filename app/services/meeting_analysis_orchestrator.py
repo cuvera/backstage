@@ -23,6 +23,7 @@ from app.messaging.producers.email_notification_producer import send_email_notif
 from app.messaging.producers.meeting_embedding_ready_producer import send_meeting_embedding_ready
 from app.services.transcription_v2_service import transcription_v2_service
 from app.services.adapters.transcription_v1_to_v2_adapter import transcription_v1_to_v2_adapter
+from app.services.agents.call_analysis.coordinator import CallAnalysisCoordinator
 from app.utils.auth_service_client import AuthServiceClient
 
 logger = logging.getLogger(__name__)
@@ -250,7 +251,7 @@ class MeetingAnalysisOrchestrator:
             # Step 2: Transform V1 to V2 format
             v2_transcription_input = transcription_v1_to_v2_adapter.transform(transcription)
             
-            await transcription_v2_service.process_and_publish(
+            v2 = await transcription_v2_service.process_and_publish(
                 v1_transcription=v2_transcription_input,
                 meeting_id=meeting_id,
                 tenant_id=tenant_id,
@@ -267,19 +268,33 @@ class MeetingAnalysisOrchestrator:
             analysis_doc = await analysis_service.get_analysis(tenant_id=tenant_id, session_id=meeting_id)
 
             if not analysis_doc:
-                call_analysis_agent = CallAnalysisAgent()
+                # call_analysis_agent = CallAnalysisAgent()
 
-                analysis = await call_analysis_agent.analyze(
-                        transcript_payload=transcription,
-                        context={
-                            "tenant_id": tenant_id,
-                            "session_id": meeting_id,
-                            "platform": platform,
-                            "meeting_title": meeting_metadata.get("summary"),
-                            "start_time": meeting_metadata.get("start_time"),
-                            "end_time": meeting_metadata.get("end_time")
+                # analysis = await call_analysis_agent.analyze(
+                #         transcript_payload=transcription,
+                #         context={
+                #             "tenant_id": tenant_id,
+                #             "session_id": meeting_id,
+                #             "platform": platform,
+                #             "meeting_title": meeting_metadata.get("summary"),
+                #             "start_time": meeting_metadata.get("start_time"),
+                #             "end_time": meeting_metadata.get("end_time")
+                #     }
+                # )
+
+                transcription_v2 = v2.get("transcription_v2");
+                analysis_coordinator = CallAnalysisCoordinator()
+                analysis_data = await analysis_coordinator.analyze_meeting(
+                    meeting_id=meeting_id,
+                    tenant_id=tenant_id,
+                    v2_transcript=transcription_v2,  # The V2 payload
+                    metadata={
+                    "title": meeting_metadata.get("summary"),
+                    "platform": platform,
+                    "participants": meeting_metadata.get("attendees")
                     }
                 )
+                analysis = MeetingAnalysis(**analysis_data)
 
                 logger.info(f"Step 2.1: Saving meeting analysis - meeting_id={meeting_id}")
                 await analysis_service.save_analysis(analysis)
