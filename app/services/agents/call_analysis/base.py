@@ -19,7 +19,7 @@ class BaseAnalysisAgent:
         prompt: str, 
         system_instruction: Optional[str] = None,
         model: str = "gemini-2.0-flash", 
-        temperature: float = 0.1,
+        temperature: float = 0,
         response_format: Optional[Dict[str, Any]] = None
     ) -> str:
         """Helper to call LLM with production-grade instruction sets."""
@@ -61,7 +61,7 @@ class BaseAnalysisAgent:
         
         # Try direct parse
         try:
-            return json.loads(cleaned)
+            return json.loads(cleaned, strict=False)
         except json.JSONDecodeError:
             pass
             
@@ -72,7 +72,7 @@ class BaseAnalysisAgent:
             end = cleaned.rfind("}")
             if start != -1 and end > start:
                 snippet = cleaned[start : end + 1]
-                return json.loads(snippet)
+                return json.loads(snippet, strict=False)
         except json.JSONDecodeError as e:
             logger.error(f"[{self.__class__.__name__}] JSON Parse Error: {e} | Raw snippet: {cleaned[:200]}...")
             # If parsing fails, we return an empty dict to prevent total failure
