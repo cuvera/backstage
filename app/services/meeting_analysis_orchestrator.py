@@ -21,6 +21,8 @@ from app.services.meeting_prep_curator_service import MeetingPrepCuratorService
 from app.messaging.producers.meeting_status_producer import send_meeting_status
 from app.messaging.producers.email_notification_producer import send_email_notification
 from app.messaging.producers.meeting_embedding_ready_producer import send_meeting_embedding_ready
+from app.services.transcription_v2_service import transcription_v2_service
+from app.services.adapters.transcription_v1_to_v2_adapter import transcription_v1_to_v2_adapter
 from app.utils.auth_service_client import AuthServiceClient
 
 logger = logging.getLogger(__name__)
@@ -133,9 +135,9 @@ class MeetingAnalysisOrchestrator:
             step_duration_ms = round((time.time() - step_start_time) * 1000, 2)
             logger.info(f"Step 0 completed in {step_duration_ms}ms - meeting_id={meeting_id}")
 
-            #################################################
-            # Step 1: Transcription with TranscriptionService v1
-            #################################################
+            ######################################################
+            # Step 1: Transcription with TranscriptionService v1 #
+            ######################################################
             step_start_time = time.time()
             logger.info(f"Step 1: Starting transcription process - meeting_id={meeting_id}")
 
@@ -241,6 +243,19 @@ class MeetingAnalysisOrchestrator:
 
             logger.debug("Waiting for 1 seconds before analysis...")
             await asyncio.sleep(1);
+
+            ########################################################
+            # Step 1.2: Transcription with TranscriptionService v2 #
+            ########################################################
+            # Step 2: Transform V1 to V2 format
+            v2_transcription_input = transcription_v1_to_v2_adapter.transform(transcription)
+            
+            await transcription_v2_service.process_and_publish(
+                v1_transcription=v2_transcription_input,
+                meeting_id=meeting_id,
+                tenant_id=tenant_id,
+                platform=original_platform
+            )
 
             #################################################
             # Step 2: Meeting Analysis with CallAnalysisAgent

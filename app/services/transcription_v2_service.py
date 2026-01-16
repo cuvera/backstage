@@ -126,23 +126,29 @@ class TranscriptionV2Service:
                 }
             }
 
-            message_id = send_transcription_v2_ready(
-                meeting_id=meeting_id,
-                tenant_id=tenant_id,
-                platform=platform,
-                status="completed",
-                segment_classifications=segment_classifications,
-                processing_stats=processing_stats
-            )
+            # write to file
+            import json
+            with open(f"data/{meeting_id}.json", "w") as f:
+                json.dump(segment_classifications, f)
 
-            logger.info(
-                f"[TranscriptionV2] V2 processing complete | meeting={meeting_id} "
-                f"msg={message_id}"
-            )
+            # message_id = send_transcription_v2_ready(
+            #     meeting_id=meeting_id,
+            #     tenant_id=tenant_id,
+            #     platform=platform,
+            #     status="completed",
+            #     segment_classifications=segment_classifications,
+            #     processing_stats=processing_stats
+            # )
+
+            # logger.info(
+            #     f"[TranscriptionV2] V2 processing complete | meeting={meeting_id} "
+            #     f"msg={message_id}"
+            # )
 
             return {
                 "status": "completed",
-                "message_id": message_id,
+                "segments": segment_classifications,
+                # "message_id": message_id,
                 "processing_stats": processing_stats
             }
 
@@ -152,26 +158,26 @@ class TranscriptionV2Service:
             )
 
             # Publish failure event
-            try:
-                message_id = send_transcription_v2_ready(
-                    meeting_id=meeting_id,
-                    tenant_id=tenant_id,
-                    platform=platform,
-                    status="failed",
-                    error=str(e)
-                )
+            # try:
+            #     # message_id = send_transcription_v2_ready(
+            #     #     meeting_id=meeting_id,
+            #     #     tenant_id=tenant_id,
+            #     #     platform=platform,
+            #     #     status="failed",
+            #     #     error=str(e)
+            #     # )
 
-                logger.info(
-                    f"[TranscriptionV2] Published failure event | meeting={meeting_id} "
-                    f"msg={message_id}"
-                )
+            #     # logger.info(
+            #     #     f"[TranscriptionV2] Published failure event | meeting={meeting_id} "
+            #     #     f"msg={message_id}"
+            #     # )
 
-            except Exception as publish_error:
-                logger.exception(
-                    f"[TranscriptionV2] Failed to publish failure event: {publish_error}"
-                )
+            # except Exception as publish_error:
+            #     logger.exception(
+            #         f"[TranscriptionV2] Failed to publish failure event: {publish_error}"
+            #     )
 
-            raise
+            # raise
 
 
 # Singleton instance
