@@ -151,6 +151,7 @@ OUTPUT REQUIREMENTS (CRITICAL):
 - Use proper JSON syntax with double quotes for strings
 - NO trailing commas allowed"""
 
+#- general_discussion: General conversation, casual exchanges, routine status updates, small talk, acknowledgments, or informational statements that do not constitute actionable items, decisions, key insights, or questions. Use this as the default classification for segments that maintain conversational flow but lack significant meeting content requiring tracking.
 SEGMENT_CLASSIFICATION_PROMPT = """You are an expert meeting analyst. Your task is to analyze a meeting transcription to identify and group related conversational segments into chronological clusters. After grouping, you must classify each cluster according to the provided definitions.
 
 CRITICAL INSTRUCTIONS:
@@ -167,7 +168,6 @@ CLASSIFICATION DEFINITIONS:
     - decision: A finalized conclusion, agreement, or choice that resolves a discussion or confirms a plan. This is the point where a consensus is reached.
     - key_insight: A critical observation, strategic discovery, identified risk, concern, or significant piece of feedback. This captures important context or problems that are not direct tasks or decisions.
     - question: A formal request for information or clarification that identifies an unknown. This includes direct questions and segments that are clearly seeking input or answers.
-    - general_discussion: General conversation, casual exchanges, routine status updates, small talk, acknowledgments, or informational statements that do not constitute actionable items, decisions, key insights, or questions. Use this as the default classification for segments that maintain conversational flow but lack significant meeting content requiring tracking.
 
 ENRICHMENT FIELDS (for ALL Clusters):
     - topic: Identify topics discussed in the meeting

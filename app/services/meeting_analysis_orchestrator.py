@@ -675,7 +675,7 @@ class MeetingAnalysisOrchestrator:
             organizer_user = None
 
             try:
-                organizer_users = await auth_client.fetch_users_by_emails([organizer_email])
+                organizer_users = await auth_client.search_users(organizer_email, tenant_id=tenant_id, limit=1)
                 if organizer_users and len(organizer_users) > 0:
                     organizer_user = organizer_users[0]
                     logger.info(f"Found organizer user: {organizer_user.get('name')} - meeting_id={meeting_id}")
@@ -695,14 +695,14 @@ class MeetingAnalysisOrchestrator:
                     # Try to find user by owner name if provided
                     if action_item.owner and action_item.owner.strip():
                         try:
-                            owner_users = await auth_client.search_users_by_name(action_item.owner, limit=1)
+                            owner_users = await auth_client.search_users(action_item.owner, tenant_id=tenant_id, limit=1)
                             if owner_users and len(owner_users) > 0:
                                 assigned_user = owner_users[0]
                                 logger.info(f"Matched owner '{action_item.owner}' to user {assigned_user.get('name')} - meeting_id={meeting_id}")
                             else:
                                 logger.info(f"No user found for owner '{action_item.owner}', using organizer - meeting_id={meeting_id}")
                         except Exception as e:
-                            logger.warning(f"Failed to search user by name '{action_item.owner}' - meeting_id={meeting_id}: {e}")
+                            logger.warning(f"Failed to search user '{action_item.owner}' - meeting_id={meeting_id}: {e}")
 
                     # Fallback to organizer if no user found
                     if not assigned_user:
@@ -718,12 +718,22 @@ class MeetingAnalysisOrchestrator:
                         "designation": assigned_user.get("designation")
                     }
 
+                    # Validate and set priority (default to "medium" for invalid values)
+                    valid_priorities = ["low", "medium", "high", "urgent"]
+                    priority = "medium"  # default
+                    if action_item.priority:
+                        priority_str = str(action_item.priority).lower().strip()
+                        if priority_str in valid_priorities:
+                            priority = priority_str
+                        else:
+                            logger.warning(f"Invalid priority '{action_item.priority}' for action item, using default 'medium' - meeting_id={meeting_id}")
+
                     # Build task object
                     task = {
                         "title": action_item.task[:200] if len(action_item.task) > 200 else action_item.task,
                         "description": action_item.task,
                         "assignees": [assignee],
-                        "priority": action_item.priority.lower() if action_item.priority else "medium",
+                        "priority": priority,
                         "tags": []
                     }
 
@@ -800,7 +810,7 @@ class MeetingAnalysisOrchestrator:
             user_mapping = []
             try:
                 auth_client = AuthServiceClient()
-                user_details = await auth_client.fetch_users_by_emails(list(all_emails))
+                user_details = await auth_client.fetch_users_by_emails(list(all_emails), tenant_id=tenant_id)
                 user_mapping = auth_client.create_user_email_mapping(user_details)
                 logger.info(f"Successfully fetched user details for {len(user_mapping)} users")
             except Exception as e:

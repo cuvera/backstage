@@ -19,34 +19,39 @@ class AuthServiceClient:
     using email addresses.
     """
     
-    async def fetch_users_by_emails(self, email_list: List[str]) -> List[Dict[str, Any]]:
+    async def fetch_users_by_emails(self, email_list: List[str], tenant_id: str) -> List[Dict[str, Any]]:
         """
         Fetch user details from auth service by email addresses.
-        
+
         Args:
             email_list: List of email addresses to fetch user details for
-            
+            tenant_id: Tenant identifier for multi-tenant isolation
+
         Returns:
             List of user objects from auth service
-            
+
         Raises:
             AuthServiceClientError: If auth service call fails or returns invalid data
         """
         if not email_list:
             return []
-        
+
         if not settings.AUTH_SERVICE_URL:
             raise AuthServiceClientError("AUTH_SERVICE_URL not configured")
-        
+
         try:
             url = f"{settings.AUTH_SERVICE_URL}/auth-service/api/v1/users/bulk-fetch"
-            logger.info(f"Fetching user details for {len(email_list)} emails from auth service at {url}")
-            
+            headers = {
+                "Content-Type": "application/json",
+                "tenant-id": tenant_id
+            }
+            logger.info(f"Fetching user details for {len(email_list)} emails for tenant '{tenant_id}' from auth service at {url}")
+
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(
                     url,
                     json={"emailIds": email_list},
-                    headers={"Content-Type": "application/json"}
+                    headers=headers
                 )
                 
                 response.raise_for_status()
@@ -73,19 +78,19 @@ class AuthServiceClient:
             raise AuthServiceClientError(f"Unexpected auth service error: {exc}") from exc
 
 
-    async def search_users_by_name(
+    async def search_users(
         self,
-        name: str,
-        page: int = 1,
+        query: str,
+        tenant_id: str,
         limit: int = 10
     ) -> List[Dict[str, Any]]:
         """
-        Search for users by name from auth service.
+        Search for users by any field (name, email, etc.) from auth service.
 
         Args:
-            name: Name to search for
-            page: Page number for pagination (default: 1)
-            limit: Number of results per page (default: 10)
+            query: Search query (can be name, email, or any searchable field)
+            tenant_id: Tenant identifier for multi-tenant isolation
+            limit: Number of results to return (default: 10)
 
         Returns:
             List of user objects matching the search query
@@ -93,7 +98,7 @@ class AuthServiceClient:
         Raises:
             AuthServiceClientError: If auth service call fails or returns invalid data
         """
-        if not name or not name.strip():
+        if not query or not query.strip():
             return []
 
         if not settings.AUTH_SERVICE_URL:
@@ -102,17 +107,20 @@ class AuthServiceClient:
         try:
             url = f"{settings.AUTH_SERVICE_URL}/auth-service/api/v1/users"
             params = {
-                "page": page,
-                "limit": limit,
-                "search": name.strip()
+                "search": query.strip(),
+                "limit": limit
             }
-            logger.info(f"Searching users by name '{name}' from auth service at {url}")
+            headers = {
+                "Content-Type": "application/json",
+                "tenant-id": tenant_id
+            }
+            logger.info(f"Searching users with query '{query}' for tenant '{tenant_id}' from auth service at {url}")
 
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(
                     url,
                     params=params,
-                    headers={"Content-Type": "application/json"}
+                    headers=headers
                 )
 
                 response.raise_for_status()
@@ -122,20 +130,20 @@ class AuthServiceClient:
                     raise AuthServiceClientError(f"Auth service returned non-success status: {data.get('status')}")
 
                 users = data.get("data", {}).get("users", [])
-                logger.info(f"Successfully found {len(users)} users matching '{name}' from auth service")
+                logger.info(f"Successfully found {len(users)} users matching '{query}' from auth service")
 
                 return users
 
         except httpx.HTTPStatusError as exc:
-            logger.error(f"HTTP error when searching users by name: {exc.response.status_code} - {exc.response.text}")
+            logger.error(f"HTTP error when searching users: {exc.response.status_code} - {exc.response.text}")
             raise AuthServiceClientError(f"Auth service HTTP error: {exc.response.status_code}") from exc
 
         except httpx.RequestError as exc:
-            logger.error(f"Request error when searching users by name: {exc}")
+            logger.error(f"Request error when searching users: {exc}")
             raise AuthServiceClientError(f"Auth service request error: {exc}") from exc
 
         except Exception as exc:
-            logger.error(f"Unexpected error when searching users by name: {exc}")
+            logger.error(f"Unexpected error when searching users: {exc}")
             raise AuthServiceClientError(f"Unexpected auth service error: {exc}") from exc
 
 
