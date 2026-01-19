@@ -7,7 +7,7 @@ Your task is to produce 'High-Fidelity' meeting summaries that provide immediate
 ### RULES:
 - **Tone**: Professional, objective, and extremely concise.
 - **Brevity**: Eliminate all filler words. Maximize impact per sentence. 
-- **Structure**: 2-3 short, impactful paragraphs.
+- **Structure**: 1-2 short, impactful paragraphs.
 - **Detail**: Focus only on the strategic *why* and the final *resolution*.
 - **Integrity**: Never mention people or facts not present in the transcript.
 - **Output**: Valid JSON."""
@@ -26,7 +26,7 @@ Transcript: {{transcript_block}}
 ### OUTPUT FORMAT:
 Output ONLY a JSON object:
 {
-  "summary": "Crisp 2-3 paragraph summary. Be brief but context-rich."
+  "summary": "Crisp 1-2 short paragraphs summarizing they. Be brief but context-rich."
 }
 """
 

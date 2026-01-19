@@ -41,6 +41,7 @@ class CallAnalysisCoordinator:
         topic_grouped_transcript = self._prepare_topic_grouped_transcript(v2_transcript)
         decisions_only = self._prepare_filtered_transcript(v2_transcript, ["decision"])
         actions_only = self._prepare_filtered_transcript(v2_transcript, ["actionable_item"])
+        insights_only = self._prepare_filtered_transcript(v2_transcript, ["key_insight"])
         
         meta_str = json.dumps(metadata or {}, indent=2)
 
@@ -51,7 +52,7 @@ class CallAnalysisCoordinator:
         # 3. Parallel Step: Targeted analysis
         results = await asyncio.gather(
             self.summary_agent.summarize(full_transcript, meta_str),
-            self.key_points_agent.extract_key_points(topic_grouped_transcript, meta_str),
+            self.key_points_agent.extract_key_points(insights_only or topic_grouped_transcript, meta_str),
             self.decision_agent.extract_decisions(decisions_only or full_transcript, meta_str),
             self.action_item_agent.extract_action_items(actions_only or full_transcript, meta_str),
             self.scoring_agent.score_call(full_transcript, meta_str, identified_agenda),
