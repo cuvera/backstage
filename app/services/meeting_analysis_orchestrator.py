@@ -1,7 +1,7 @@
 import logging
 import os
 import tempfile
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import time
 from datetime import datetime
 import shutil
@@ -14,6 +14,7 @@ from app.utils.audio_merger import find_files_from_s3, list_files_in_s3_folder
 from app.services.meeting_analysis_service import MeetingAnalysisService
 from app.repository import MeetingMetadataRepository
 from app.repository.transcription_v1_repository import TranscriptionV1Repository
+from app.repository.transcription_v2_repository import TranscriptionV2Repository
 from app.utils.s3_client import download_s3_file
 from app.core.config import settings
 from app.services.agents import TranscriptionAgent, CallAnalysisAgent
@@ -249,15 +250,48 @@ class MeetingAnalysisOrchestrator:
             ########################################################
             # Step 1.2: Transcription with TranscriptionService v2 #
             ########################################################
-            # Step 2: Transform V1 to V2 format
-            v2_transcription_input = transcription_v1_to_v2_adapter.transform(transcription)
-            
-            v2 = await transcription_v2_service.process_and_publish(
-                v1_transcription=v2_transcription_input,
+            logger.info(f"[Orchestrator] Step 1.2: Processing transcription V2 for meeting {meeting_id}")
+
+            # Initialize V2 repository
+            transcription_v2_repo = await TranscriptionV2Repository.from_default()
+
+            # Check if V2 already exists in database
+            existing_v2_doc = await transcription_v2_repo.get_by_meeting_id(
                 meeting_id=meeting_id,
-                tenant_id=tenant_id,
-                platform=original_platform
+                tenant_id=tenant_id
             )
+
+            if existing_v2_doc:
+                logger.info(f"[Orchestrator] Transcription V2 already exists in database, skipping processing")
+                # Use existing V2 from database
+                transcription_v2 = {
+                    "segments": [segment.model_dump() for segment in existing_v2_doc.segments],
+                    "metadata": existing_v2_doc.metadata.model_dump()
+                }
+                v2 = {"transcription_v2": transcription_v2}
+            else:
+                logger.info(f"[Orchestrator] Transcription V2 not found, processing from V1")
+                # Transform V1 to V2 format
+                v2_transcription_input = transcription_v1_to_v2_adapter.transform(transcription)
+
+                # Process V2 transcription (normalization + classification)
+                v2 = await transcription_v2_service.process_and_publish(
+                    v1_transcription=v2_transcription_input,
+                    meeting_id=meeting_id,
+                    tenant_id=tenant_id,
+                    platform=original_platform
+                )
+
+                # Save transcription V2 to database
+                transcription_v2 = v2.get("transcription_v2")
+                if transcription_v2:
+                    logger.info(f"[Orchestrator] Saving transcription V2 to database")
+                    await transcription_v2_repo.save_transcription(
+                        meeting_id=meeting_id,
+                        tenant_id=tenant_id,
+                        transcription_v2=transcription_v2
+                    )
+                    logger.info(f"[Orchestrator] Transcription V2 saved successfully")
 
             #################################################
             # Step 2: Meeting Analysis with CallAnalysisAgent

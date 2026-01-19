@@ -24,12 +24,13 @@ class SegmentClassificationProcessor:
     Uses enhanced LLM client with multi-provider fallback support.
     """
 
-    # Target segment types (general_discussion is classified but filtered out)
+    # Target segment types
     TARGET_TYPES = {
         "actionable_item",
         "decision",
         "key_insight",
         "question",
+        "general_discussion",
     }
 
     ALL_TYPES = TARGET_TYPES | {"general_discussion"}

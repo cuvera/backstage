@@ -126,10 +126,8 @@ class TranscriptionV2Service:
                 }
             }
 
-            # write to file
-            import json
-            with open(f"data/{meeting_id}.json", "w") as f:
-                json.dump(segment_classifications, f)
+            # V2 is now stored in database by the orchestrator
+            # File writing removed - database is the single source of truth
 
             # message_id = send_transcription_v2_ready(
             #     meeting_id=meeting_id,
