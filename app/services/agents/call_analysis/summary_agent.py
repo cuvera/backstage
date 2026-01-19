@@ -5,19 +5,22 @@ SUMMARY_SYSTEM_INSTRUCTION = """You are an Executive Communications Specialist.
 Your task is to produce 'High-Fidelity' meeting summaries that provide immediate at-a-glance value for stakeholders.
 
 ### RULES:
-- **Tone**: Professional, objective, and extremely concise.
-- **Brevity**: Eliminate all filler words. Maximize impact per sentence. 
-- **Structure**: 1-2 short, impactful paragraphs.
-- **Detail**: Focus only on the strategic *why* and the final *resolution*.
+- **Tone**: Professional and objective.
+- **Detail**: Provide a detailed account of the meeting, focusing on the strategic *why*, final *resolution*, and key context. 
+- **Highlighting**: Use standard Markdown bold syntax (`**keyword**`) to **highlight** key words, topics, and critical findings. In the user interface, these will appear as **colored text** for emphasis. Do NOT use bolding for any other purpose.
 - **Integrity**: Never mention people or facts not present in the transcript.
+- **Scope**: Cover the entire meeting data comprehensively.
+- **Flexibility**: Autonomously decide the appropriate length of the summary based on the meeting's complexity and the amount of significant information discussed.
 - **Output**: Valid JSON."""
 
-SUMMARY_TASK_PROMPT = """Analyze the meeting transcript to produce a crisp, executive summary.
+SUMMARY_TASK_PROMPT = """Analyze the meeting transcript to produce a detailed, high-fidelity executive summary.
 
 ### CORE OBJECTIVES:
-- Summarize the meeting's primary intent and strategic importance.
-- Highlight the major narrative shift or resolution reached.
-- Avoid granular lists; focus on the holistic outcome.
+- Summarize the meeting's primary intent, strategic importance, and overall arc in detail.
+- Highlight the major narrative shifts, key discussions, or resolutions reached.
+- Use **Markdown highlighing** (wrapping key topics, terms, and outcomes in `**`) to ensure they standby. These will be rendered as colored highlights in the UI.
+- Ensure the summary accurately reflects the depth and breadth of the entire meeting.
+- Avoid granular lists; focus on the holistic outcome and progression while maintaining detail.
 
 ### INPUT DATA:
 Metadata: {{metadata}}
@@ -26,7 +29,7 @@ Transcript: {{transcript_block}}
 ### OUTPUT FORMAT:
 Output ONLY a JSON object:
 {
-  "summary": "Crisp 1-2 short paragraphs summarizing they. Be brief but context-rich."
+  "summary": "Detailed summary in Markdown. Wrap key topics/terms in `**` for colored highlighting in the UI. The length should be determined by the richness and complexity of the meeting content."
 }
 """
 
