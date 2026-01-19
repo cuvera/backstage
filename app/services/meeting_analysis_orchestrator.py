@@ -21,6 +21,7 @@ from app.services.meeting_prep_curator_service import MeetingPrepCuratorService
 from app.messaging.producers.meeting_status_producer import send_meeting_status
 from app.messaging.producers.email_notification_producer import send_email_notification
 from app.messaging.producers.meeting_embedding_ready_producer import send_meeting_embedding_ready
+from app.messaging.producers.task_commands_producer import send_task_creation_command
 from app.services.transcription_v2_service import transcription_v2_service
 from app.services.adapters.transcription_v1_to_v2_adapter import transcription_v1_to_v2_adapter
 from app.services.agents.call_analysis.coordinator import CallAnalysisCoordinator
@@ -304,7 +305,15 @@ class MeetingAnalysisOrchestrator:
             
             step_duration_ms = round((time.time() - step_start_time) * 1000, 2)
             logger.info(f"Step 2 completed in {step_duration_ms}ms - meeting_id={meeting_id}")
-            
+
+            # Generate tasks from action items
+            await self._generate_tasks_from_action_items(
+                meeting_id=meeting_id,
+                tenant_id=tenant_id,
+                analysis=analysis,
+                meeting_metadata=meeting_metadata
+            )
+
             logger.debug("Waiting for 1 seconds before meeting preparation...")
             await asyncio.sleep(1)
 
@@ -571,6 +580,150 @@ class MeetingAnalysisOrchestrator:
             'local_merged_file_path': file_url,
             'temp_directory': str(temp_dir)
         }
+
+    def _is_valid_iso_date(self, date_str: Optional[str]) -> bool:
+        """
+        Check if a date string is in valid ISO 8601 format.
+
+        Args:
+            date_str: Date string to validate
+
+        Returns:
+            True if valid ISO format, False otherwise
+        """
+        if not date_str or not isinstance(date_str, str):
+            return False
+
+        try:
+            from datetime import datetime
+            # Try parsing ISO format (YYYY-MM-DD or full datetime with T)
+            if 'T' in date_str:
+                datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+            else:
+                datetime.strptime(date_str, '%Y-%m-%d')
+            return True
+        except (ValueError, AttributeError):
+            return False
+
+    async def _generate_tasks_from_action_items(
+        self,
+        meeting_id: str,
+        tenant_id: str,
+        analysis: MeetingAnalysis,
+        meeting_metadata: Dict[str, Any]
+    ) -> None:
+        """
+        Generate tasks from meeting action items and publish to task management system.
+
+        Args:
+            meeting_id: Meeting identifier
+            tenant_id: Tenant identifier
+            analysis: Meeting analysis containing action items
+            meeting_metadata: Meeting metadata from repository
+        """
+        try:
+            # Extract action items
+            action_items = analysis.action_items
+            if not action_items or len(action_items) == 0:
+                logger.info(f"No action items found, skipping task generation - meeting_id={meeting_id}")
+                return
+
+            logger.info(f"Starting task generation for {len(action_items)} action items - meeting_id={meeting_id}")
+
+            # Get organizer information
+            organizer_email = meeting_metadata.get('organizer')
+            if not organizer_email:
+                logger.warning(f"No organizer found in meeting metadata, cannot generate tasks - meeting_id={meeting_id}")
+                return
+
+            # Fetch organizer user details from auth service
+            auth_client = AuthServiceClient()
+            organizer_user = None
+
+            try:
+                organizer_users = await auth_client.fetch_users_by_emails([organizer_email])
+                if organizer_users and len(organizer_users) > 0:
+                    organizer_user = organizer_users[0]
+                    logger.info(f"Found organizer user: {organizer_user.get('name')} - meeting_id={meeting_id}")
+                else:
+                    logger.warning(f"Organizer not found in auth service: {organizer_email} - meeting_id={meeting_id}")
+                    return
+            except Exception as e:
+                logger.error(f"Failed to fetch organizer from auth service - meeting_id={meeting_id}: {e}")
+                return
+
+            # Process each action item
+            tasks = []
+            for idx, action_item in enumerate(action_items):
+                try:
+                    assigned_user = None
+
+                    # Try to find user by owner name if provided
+                    if action_item.owner and action_item.owner.strip():
+                        try:
+                            owner_users = await auth_client.search_users_by_name(action_item.owner, limit=1)
+                            if owner_users and len(owner_users) > 0:
+                                assigned_user = owner_users[0]
+                                logger.info(f"Matched owner '{action_item.owner}' to user {assigned_user.get('name')} - meeting_id={meeting_id}")
+                            else:
+                                logger.info(f"No user found for owner '{action_item.owner}', using organizer - meeting_id={meeting_id}")
+                        except Exception as e:
+                            logger.warning(f"Failed to search user by name '{action_item.owner}' - meeting_id={meeting_id}: {e}")
+
+                    # Fallback to organizer if no user found
+                    if not assigned_user:
+                        assigned_user = organizer_user
+
+                    # Build assignee object with all required fields
+                    assignee = {
+                        "userId": assigned_user.get("id"),
+                        "employeeId": assigned_user.get("employeeId"),
+                        "name": assigned_user.get("name"),
+                        "email": assigned_user.get("email"),
+                        "department": assigned_user.get("department"),
+                        "designation": assigned_user.get("designation")
+                    }
+
+                    # Build task object
+                    task = {
+                        "title": action_item.task[:200] if len(action_item.task) > 200 else action_item.task,
+                        "description": action_item.task,
+                        "assignees": [assignee],
+                        "priority": action_item.priority.lower() if action_item.priority else "medium",
+                        "tags": []
+                    }
+
+                    # Add due date only if valid ISO format
+                    if self._is_valid_iso_date(action_item.due_date):
+                        task["dueDate"] = action_item.due_date
+
+                    tasks.append(task)
+                    logger.debug(f"Created task {idx + 1}/{len(action_items)} - meeting_id={meeting_id}")
+
+                except Exception as e:
+                    logger.error(f"Failed to process action item {idx + 1} - meeting_id={meeting_id}: {e}", exc_info=True)
+                    continue
+
+            # Publish tasks if any were successfully created
+            if tasks:
+                meeting_title = meeting_metadata.get('summary', 'Meeting')
+                meeting_date = meeting_metadata.get('start_time').isoformat() if meeting_metadata.get('start_time') else datetime.now().isoformat()
+
+                send_task_creation_command(
+                    meeting_id=meeting_id,
+                    tenant_id=tenant_id,
+                    meeting_title=meeting_title,
+                    meeting_date=meeting_date,
+                    tasks=tasks
+                )
+
+                logger.info(f"Successfully published {len(tasks)} tasks to task management system - meeting_id={meeting_id}")
+            else:
+                logger.warning(f"No tasks were successfully created from action items - meeting_id={meeting_id}")
+
+        except Exception as e:
+            logger.error(f"Task generation failed - meeting_id={meeting_id}: {str(e)}", exc_info=True)
+            # Don't raise - task generation failure should not fail the entire meeting analysis
 
     async def _send_meeting_completion_email(
         self,

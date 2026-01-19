@@ -73,13 +73,79 @@ class AuthServiceClient:
             raise AuthServiceClientError(f"Unexpected auth service error: {exc}") from exc
 
 
+    async def search_users_by_name(
+        self,
+        name: str,
+        page: int = 1,
+        limit: int = 10
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for users by name from auth service.
+
+        Args:
+            name: Name to search for
+            page: Page number for pagination (default: 1)
+            limit: Number of results per page (default: 10)
+
+        Returns:
+            List of user objects matching the search query
+
+        Raises:
+            AuthServiceClientError: If auth service call fails or returns invalid data
+        """
+        if not name or not name.strip():
+            return []
+
+        if not settings.AUTH_SERVICE_URL:
+            raise AuthServiceClientError("AUTH_SERVICE_URL not configured")
+
+        try:
+            url = f"{settings.AUTH_SERVICE_URL}/auth-service/api/v1/users"
+            params = {
+                "page": page,
+                "limit": limit,
+                "search": name.strip()
+            }
+            logger.info(f"Searching users by name '{name}' from auth service at {url}")
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(
+                    url,
+                    params=params,
+                    headers={"Content-Type": "application/json"}
+                )
+
+                response.raise_for_status()
+
+                data = response.json()
+                if data.get("status") != "success":
+                    raise AuthServiceClientError(f"Auth service returned non-success status: {data.get('status')}")
+
+                users = data.get("data", {}).get("users", [])
+                logger.info(f"Successfully found {len(users)} users matching '{name}' from auth service")
+
+                return users
+
+        except httpx.HTTPStatusError as exc:
+            logger.error(f"HTTP error when searching users by name: {exc.response.status_code} - {exc.response.text}")
+            raise AuthServiceClientError(f"Auth service HTTP error: {exc.response.status_code}") from exc
+
+        except httpx.RequestError as exc:
+            logger.error(f"Request error when searching users by name: {exc}")
+            raise AuthServiceClientError(f"Auth service request error: {exc}") from exc
+
+        except Exception as exc:
+            logger.error(f"Unexpected error when searching users by name: {exc}")
+            raise AuthServiceClientError(f"Unexpected auth service error: {exc}") from exc
+
+
     def create_user_email_mapping(self, users: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
         """
         Create a mapping of email to user data for easy lookup.
-        
+
         Args:
             users: List of user objects from auth service
-            
+
         Returns:
             Dictionary mapping email addresses to user objects
         """
