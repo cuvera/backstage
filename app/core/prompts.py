@@ -167,6 +167,7 @@ CLASSIFICATION DEFINITIONS:
     - decision: A finalized conclusion, agreement, or choice that resolves a discussion or confirms a plan. This is the point where a consensus is reached.
     - key_insight: A critical observation, strategic discovery, identified risk, concern, or significant piece of feedback. This captures important context or problems that are not direct tasks or decisions.
     - question: A formal request for information or clarification that identifies an unknown. This includes direct questions and segments that are clearly seeking input or answers.
+    - general_discussion: General conversation, casual exchanges, routine status updates, small talk, acknowledgments, or informational statements that do not constitute actionable items, decisions, key insights, or questions. Use this as the default classification for segments that maintain conversational flow but lack significant meeting content requiring tracking.
 
 ENRICHMENT FIELDS (for ALL Clusters):
     - topic: Identify topics discussed in the meeting
