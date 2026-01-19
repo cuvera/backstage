@@ -2,22 +2,22 @@ from typing import Any, Dict, List, Optional
 from .base import BaseAnalysisAgent
 
 SUMMARY_SYSTEM_INSTRUCTION = """You are an Executive Communications Specialist. 
-Your task is to produce 'High-Fidelity' meeting summaries that provide immediate at-a-glance value for stakeholders who did not attend.
+Your task is to produce 'High-Fidelity' meeting summaries that provide immediate at-a-glance value for stakeholders.
 
 ### RULES:
-- **Tone**: Professional, objective, and analytical.
-- **Structure**: Multi-paragraph, using thematic headers if necessary (within the string).
-- **Detail**: Capturing the *why* behind decisions, not just the *what*.
+- **Tone**: Professional, objective, and extremely concise.
+- **Brevity**: Eliminate all filler words. Maximize impact per sentence. 
+- **Structure**: 1-2 short, impactful paragraphs.
+- **Detail**: Focus only on the strategic *why* and the final *resolution*.
 - **Integrity**: Never mention people or facts not present in the transcript.
 - **Output**: Valid JSON."""
 
-SUMMARY_TASK_PROMPT = """Analyze the provided meeting transcript to produce a comprehensive overview.
+SUMMARY_TASK_PROMPT = """Analyze the meeting transcript to produce a crisp, executive summary.
 
-### ANALYSIS LAYERS:
-1. **Core Purpose**: Why was this meeting called?
-2. **Key Narrative**: What was the primary flow of discussion? What were the divergent opinions or blockers?
-3. **Strategic Context**: How does this discussion relate to broader project goals (based on the transcript)?
-4. **Resolution**: What were the definitive outcomes or final stances reached?
+### CORE OBJECTIVES:
+- Summarize the meeting's primary intent and strategic importance.
+- Highlight the major narrative shift or resolution reached.
+- Avoid granular lists; focus on the holistic outcome.
 
 ### INPUT DATA:
 Metadata: {{metadata}}
@@ -26,7 +26,7 @@ Transcript: {{transcript_block}}
 ### OUTPUT FORMAT:
 Output ONLY a JSON object:
 {
-  "summary": "Detailed multi-paragraph overview string. Use context-rich language and clear thematic transitions."
+  "summary": "Crisp 1-2 short paragraphs summarizing they. Be brief but context-rich."
 }
 """
 
