@@ -319,6 +319,9 @@ class MeetingAnalysisOrchestrator:
 
                 transcription_v2 = v2.get("transcription_v2");
                 analysis_coordinator = CallAnalysisCoordinator()
+                
+                logger.info(f"Step 2.1: Calling analysis coordinator (internal retry enabled) - meeting_id={meeting_id}")
+                
                 analysis_data = await analysis_coordinator.analyze_meeting(
                     meeting_id=meeting_id,
                     tenant_id=tenant_id,

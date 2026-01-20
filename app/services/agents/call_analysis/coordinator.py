@@ -33,72 +33,94 @@ class CallAnalysisCoordinator:
         v2_transcript: Dict[str, Any],
         metadata: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        """Runs the multi-agent analysis flow using V2 structured data."""
+        """Runs the multi-agent analysis flow using V2 structured data with internal retry logic."""
         logger.info(f"[CallAnalysisCoordinator] Starting analysis for meeting {meeting_id}")
         
-        # 1. Prepare Diverse Inputs
-        full_transcript = self._prepare_full_transcript(v2_transcript)
-        topic_grouped_transcript = self._prepare_topic_grouped_transcript(v2_transcript)
-        decisions_only = self._prepare_filtered_transcript(v2_transcript, ["decision"])
-        actions_only = self._prepare_filtered_transcript(v2_transcript, ["actionable_item"])
-        insights_only = self._prepare_filtered_transcript(v2_transcript, ["key_insight"])
+        MAX_RETRIES = 2
+        RETRY_DELAY = 5
         
-        meta_str = json.dumps(metadata or {}, indent=2)
+        last_error = None
+        
+        for attempt in range(MAX_RETRIES):
+            try:
+                if attempt > 0:
+                    logger.info(
+                        f"[CallAnalysisCoordinator] Retrying analysis "
+                        f"(attempt {attempt + 1}/{MAX_RETRIES}) for {meeting_id}"
+                    )
+                    await asyncio.sleep(RETRY_DELAY)
 
-        # 2. Sequential Step: Agenda Inference
-        identified_agenda = await self.agenda_agent.infer_agenda(full_transcript, meta_str)
-        logger.info(f"[CallAnalysisCoordinator] Agenda inferred: {identified_agenda}")
+                # 1. Prepare Diverse Inputs
+                full_transcript = self._prepare_full_transcript(v2_transcript)
+                topic_grouped_transcript = self._prepare_topic_grouped_transcript(v2_transcript)
+                decisions_only = self._prepare_filtered_transcript(v2_transcript, ["decision"])
+                actions_only = self._prepare_filtered_transcript(v2_transcript, ["actionable_item"])
+                insights_only = self._prepare_filtered_transcript(v2_transcript, ["key_insight"])
+                
+                meta_str = json.dumps(metadata or {}, indent=2)
 
-        # 3. Parallel Step: Targeted analysis
-        results = await asyncio.gather(
-            self.summary_agent.summarize(full_transcript, meta_str),
-            self.key_points_agent.extract_key_points(insights_only or topic_grouped_transcript, meta_str),
-            self.decision_agent.extract_decisions(decisions_only or full_transcript, meta_str),
-            self.action_item_agent.extract_action_items(actions_only or full_transcript, meta_str),
-            self.scoring_agent.score_call(full_transcript, meta_str, identified_agenda),
-            return_exceptions=True
-        )
+                # 2. Sequential Step: Agenda Inference
+                identified_agenda = await self.agenda_agent.infer_agenda(full_transcript, meta_str)
+                logger.info(f"[CallAnalysisCoordinator] Agenda inferred: {identified_agenda}")
 
-        # 4. Process Parallel Results
-        summary = results[0] if not isinstance(results[0], Exception) else "Summary generation failed"
-        key_points = results[1] if not isinstance(results[1], Exception) else []
-        decisions = results[2] if not isinstance(results[2], Exception) else []
-        action_items = results[3] if not isinstance(results[3], Exception) else []
-        scoring = results[4] if not isinstance(results[4], Exception) else {}
+                # 3. Parallel Step: Targeted analysis
+                results = await asyncio.gather(
+                    self.summary_agent.summarize(full_transcript, meta_str),
+                    self.key_points_agent.extract_key_points(insights_only or topic_grouped_transcript, meta_str),
+                    self.decision_agent.extract_decisions(decisions_only or full_transcript, meta_str),
+                    self.action_item_agent.extract_action_items(actions_only or full_transcript, meta_str),
+                    self.scoring_agent.score_call(full_transcript, meta_str, identified_agenda),
+                    return_exceptions=False
+                )
 
-        # 5. Computational Steps (Non-LLM)
-        talk_time_stats = self._calculate_talk_time_stats(v2_transcript)
-        sentiment_overview = self._aggregate_sentiment(v2_transcript)
+                # 4. Process Parallel Results
+                # Exceptions are propagated so we can unpack directly
+                summary, key_points, decisions, action_items, scoring = results
 
-        # 6. Assemble Final Object
-        analysis_result = {
-            "session_id": meeting_id,
-            "tenant_id": tenant_id,
-            "summary": summary,
-            "key_points": key_points,
-            "decisions": decisions,
-            "action_items": action_items,
-            "talk_time_stats": talk_time_stats,
-            "sentiment_overview": sentiment_overview,
-            "call_scoring": {
-                "score": scoring.get("score", 0.0),
-                "identified_agenda": identified_agenda,
-                "agenda_deviation_score": scoring.get("agenda_deviation_score", 0.0),
-                "action_item_completeness_score": scoring.get("action_item_completeness_score", 0.0),
-                "owner_clarity_score": scoring.get("owner_clarity_score", 0.0),
-                "due_date_quality_score": scoring.get("due_date_quality_score", 0.0),
-                "meeting_structure_score": scoring.get("meeting_structure_score", 0.0),
-                "signal_noise_ratio_score": scoring.get("signal_noise_ratio_score", 0.0),
-                "time_management_score": scoring.get("time_management_score", 0.0),
-                "positive_aspects": scoring.get("positive_aspects", []),
-                "areas_for_improvement": scoring.get("areas_for_improvement", [])
-            },
-            "created_at": datetime.utcnow().isoformat() + "Z",
-            "metadata": metadata or {}
-        }
+                # 5. Computational Steps (Non-LLM)
+                talk_time_stats = self._calculate_talk_time_stats(v2_transcript)
+                sentiment_overview = self._aggregate_sentiment(v2_transcript)
 
-        logger.info(f"[CallAnalysisCoordinator] Analysis completed for meeting {meeting_id}")
-        return analysis_result
+                # 6. Assemble Final Object
+                analysis_result = {
+                    "session_id": meeting_id,
+                    "tenant_id": tenant_id,
+                    "summary": summary,
+                    "key_points": key_points,
+                    "decisions": decisions,
+                    "action_items": action_items,
+                    "talk_time_stats": talk_time_stats,
+                    "sentiment_overview": sentiment_overview,
+                    "call_scoring": {
+                        "score": scoring.get("score", 0.0),
+                        "identified_agenda": identified_agenda,
+                        "agenda_deviation_score": scoring.get("agenda_deviation_score", 0.0),
+                        "action_item_completeness_score": scoring.get("action_item_completeness_score", 0.0),
+                        "owner_clarity_score": scoring.get("owner_clarity_score", 0.0),
+                        "due_date_quality_score": scoring.get("due_date_quality_score", 0.0),
+                        "meeting_structure_score": scoring.get("meeting_structure_score", 0.0),
+                        "signal_noise_ratio_score": scoring.get("signal_noise_ratio_score", 0.0),
+                        "time_management_score": scoring.get("time_management_score", 0.0),
+                        "positive_aspects": scoring.get("positive_aspects", []),
+                        "areas_for_improvement": scoring.get("areas_for_improvement", [])
+                    },
+                    "created_at": datetime.utcnow().isoformat() + "Z",
+                    "metadata": metadata or {}
+                }
+
+                logger.info(f"[CallAnalysisCoordinator] Analysis completed for meeting {meeting_id}")
+                return analysis_result
+
+            except Exception as e:
+                last_error = e
+                logger.error(f"[CallAnalysisCoordinator] Analysis failed (attempt {attempt + 1}/{MAX_RETRIES}): {e}")
+                
+                if attempt == MAX_RETRIES - 1:
+                    logger.error(f"[CallAnalysisCoordinator] All retry attempts failed for {meeting_id}")
+                    raise last_error
+
+        # Should not reach here if loop is correct, but safe fallback
+        raise last_error
 
     def _prepare_full_transcript(self, v2_data: Dict[str, Any]) -> str:
         """Flattens all V2 clusters into a single readable block."""
