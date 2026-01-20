@@ -344,11 +344,14 @@ class MeetingAnalysisOrchestrator:
             logger.info(f"Step 2 completed in {step_duration_ms}ms - meeting_id={meeting_id}")
 
             # Generate tasks from action items
+            # Determine platform type: offline if platform is "offline", otherwise online
+            platform_type = "offline" if original_platform == "offline" else "online"
             await self._generate_tasks_from_action_items(
                 meeting_id=meeting_id,
                 tenant_id=tenant_id,
                 analysis=analysis,
-                meeting_metadata=meeting_metadata
+                meeting_metadata=meeting_metadata,
+                platform=platform_type
             )
 
             logger.debug("Waiting for 1 seconds before meeting preparation...")
@@ -647,7 +650,8 @@ class MeetingAnalysisOrchestrator:
         meeting_id: str,
         tenant_id: str,
         analysis: MeetingAnalysis,
-        meeting_metadata: Dict[str, Any]
+        meeting_metadata: Dict[str, Any],
+        platform: str
     ) -> None:
         """
         Generate tasks from meeting action items and publish to task management system.
@@ -657,6 +661,7 @@ class MeetingAnalysisOrchestrator:
             tenant_id: Tenant identifier
             analysis: Meeting analysis containing action items
             meeting_metadata: Meeting metadata from repository
+            platform: Platform type ("online" or "offline")
         """
         try:
             # Extract action items
@@ -761,7 +766,8 @@ class MeetingAnalysisOrchestrator:
                     tenant_id=tenant_id,
                     meeting_title=meeting_title,
                     meeting_date=meeting_date,
-                    tasks=tasks
+                    tasks=tasks,
+                    platform=platform
                 )
 
                 logger.info(f"Successfully published {len(tasks)} tasks to task management system - meeting_id={meeting_id}")

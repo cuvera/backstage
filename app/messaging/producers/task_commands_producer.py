@@ -30,6 +30,7 @@ def send_task_creation_command(
     meeting_title: str,
     meeting_date: str,
     tasks: List[Dict[str, Any]],
+    platform: str,
     message_id: Optional[str] = None,
 ) -> str:
     """
@@ -41,6 +42,7 @@ def send_task_creation_command(
         meeting_title: Title of the meeting
         meeting_date: Meeting date in ISO format
         tasks: List of task objects with title, description, assignees, priority, dueDate, tags
+        platform: Platform type ("online" or "offline")
         message_id: Custom message ID for idempotency (optional)
 
     Returns:
@@ -52,6 +54,7 @@ def send_task_creation_command(
         meeting_title=meeting_title,
         meeting_date=meeting_date,
         tasks=tasks,
+        platform=platform,
         message_id=message_id,
     )
 
@@ -76,6 +79,7 @@ def _build_envelope(
     meeting_title: str,
     meeting_date: str,
     tasks: List[Dict[str, Any]],
+    platform: str,
     message_id: Optional[str],
 ) -> Dict[str, Any]:
     event_metadata = {
@@ -90,7 +94,8 @@ def _build_envelope(
             "id": meeting_id,
             "metadata": {
                 "meetingTitle": meeting_title,
-                "meetingDate": meeting_date
+                "meetingDate": meeting_date,
+                "platform": platform
             }
         },
         "payload": {
