@@ -131,7 +131,30 @@ class TranscriptionService:
         logger.info(f"[TranscriptionService] Generated {len(chunks)} audio chunks")
         # print(chunks)
         return chunks
-    
+
+    def _extract_participant_names(self, meeting_metadata: Dict) -> List[str]:
+        """
+        Extract unique participant names from speaker_timeframes in meeting metadata.
+
+        Args:
+            meeting_metadata: Meeting metadata containing speaker_timeframes
+
+        Returns:
+            List of unique participant names from speaker_timeframes
+        """
+        participant_names = []
+
+        # Extract from speaker_timeframes
+        speaker_timeframes = meeting_metadata.get("speaker_timeframes", [])
+        if speaker_timeframes:
+            for timeframe in speaker_timeframes:
+                speaker_name = timeframe.get("speaker_name")
+                if speaker_name and speaker_name not in participant_names:
+                    participant_names.append(speaker_name)
+
+        logger.info(f"[TranscriptionService] Extracted {len(participant_names)} participant names: {participant_names}")
+        return participant_names
+
     async def _transcribe_chunk_with_semaphore(
         self,
         prompt: str,
@@ -164,6 +187,7 @@ class TranscriptionService:
         self,
         chunks: List[Dict],
         platform: str,
+        participant_names: List[str],
         models: Optional[List[Dict[str, Any]]] = None
     ) -> List[Dict[str, Any]]:
         """
@@ -172,6 +196,7 @@ class TranscriptionService:
         Args:
             chunks: List of audio chunks
             platform: "online" or "offline" for prompt selection
+            participant_names: List of known participant names to include as hints
             models: Optional list of model configs for fallback chain
 
         Returns:
@@ -197,7 +222,11 @@ class TranscriptionService:
             prompt = prompt.replace("{{start}}", chunk.get("start_time", ""))
             prompt = prompt.replace("{{end}}", chunk.get("end_time", ""))
             prompt = prompt.replace("{{segments}}", json.dumps(chunk.get("segments", [])))
-            
+
+            # Replace participants placeholder
+            participants_str = "\n".join(f"- {name}" for name in participant_names) if participant_names else "Not specified"
+            prompt = prompt.replace("{{participants}}", participants_str)
+
             # print chunk dictionary
             print(chunks)
 
@@ -251,6 +280,7 @@ class TranscriptionService:
         platform: str,
         meeting_id: str,
         tenant_id: str,
+        participant_names: List[str],
         models: Optional[List[Dict[str, Any]]] = None
     ) -> List[Dict[str, Any]]:
         """
@@ -262,6 +292,7 @@ class TranscriptionService:
             platform: "online" or "offline" for prompt selection
             meeting_id: Meeting identifier for chunk persistence
             tenant_id: Tenant identifier for chunk persistence
+            participant_names: List of known participant names to include as hints
             models: Optional list of model configs for fallback chain
 
         Returns:
@@ -288,6 +319,10 @@ class TranscriptionService:
             prompt = prompt.replace("{{start}}", chunk.get("start_time", ""))
             prompt = prompt.replace("{{end}}", chunk.get("end_time", ""))
             prompt = prompt.replace("{{segments}}", json.dumps(chunk.get("segments", [])))
+
+            # Replace participants placeholder
+            participants_str = "\n".join(f"- {name}" for name in participant_names) if participant_names else "Not specified"
+            prompt = prompt.replace("{{participants}}", participants_str)
 
             # Create task with semaphore control
             task = asyncio.create_task(
@@ -330,6 +365,10 @@ class TranscriptionService:
                         prompt = prompt.replace("{{start}}", chunk.get("start_time", ""))
                         prompt = prompt.replace("{{end}}", chunk.get("end_time", ""))
                         prompt = prompt.replace("{{segments}}", json.dumps(chunk.get("segments", [])))
+
+                        # Replace participants placeholder
+                        participants_str = "\n".join(f"- {name}" for name in participant_names) if participant_names else "Not specified"
+                        prompt = prompt.replace("{{participants}}", participants_str)
 
                         task = asyncio.create_task(
                             self._transcribe_chunk_with_semaphore(prompt, chunk["file_path"], models)
@@ -660,6 +699,9 @@ class TranscriptionService:
         start_time = asyncio.get_event_loop().time()
 
         try:
+            # 0. Extract participant names from metadata
+            participant_names = self._extract_participant_names(meeting_metadata)
+
             # 1. Chunk audio based on platform strategy
             chunks = await self._chunk_audio(
                 audio_file_path,
@@ -711,6 +753,7 @@ class TranscriptionService:
                         platform,
                         meeting_id,
                         tenant_id,
+                        participant_names,
                         models
                     )
                 else:
@@ -718,6 +761,7 @@ class TranscriptionService:
                     new_transcription_results = await self._transcribe_chunks_parallel(
                         chunks_to_process,
                         platform,
+                        participant_names,
                         models
                     )
 

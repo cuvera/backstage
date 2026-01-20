@@ -672,27 +672,23 @@ class MeetingAnalysisOrchestrator:
 
             logger.info(f"Starting task generation for {len(action_items)} action items - meeting_id={meeting_id}")
 
-            # Get organizer information
-            organizer_email = meeting_metadata.get('organizer')
-            if not organizer_email:
-                logger.warning(f"No organizer found in meeting metadata, cannot generate tasks - meeting_id={meeting_id}")
-                return
-
-            # Fetch organizer user details from auth service
+            # Get organizer information (optional - used as fallback for tasks without owners)
             auth_client = AuthServiceClient()
             organizer_user = None
+            organizer_email = meeting_metadata.get('organizer')
 
-            try:
-                organizer_users = await auth_client.search_users(organizer_email, tenant_id=tenant_id, limit=1)
-                if organizer_users and len(organizer_users) > 0:
-                    organizer_user = organizer_users[0]
-                    logger.info(f"Found organizer user: {organizer_user.get('name')} - meeting_id={meeting_id}")
-                else:
-                    logger.warning(f"Organizer not found in auth service: {organizer_email} - meeting_id={meeting_id}")
-                    return
-            except Exception as e:
-                logger.error(f"Failed to fetch organizer from auth service - meeting_id={meeting_id}: {e}")
-                return
+            if organizer_email:
+                try:
+                    organizer_users = await auth_client.search_users(organizer_email, tenant_id=tenant_id, limit=1)
+                    if organizer_users and len(organizer_users) > 0:
+                        organizer_user = organizer_users[0]
+                        logger.info(f"Found organizer user: {organizer_user.get('name')} - meeting_id={meeting_id}")
+                    else:
+                        logger.warning(f"Organizer not found in auth service: {organizer_email} - meeting_id={meeting_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to fetch organizer from auth service - meeting_id={meeting_id}: {e}")
+            else:
+                logger.warning(f"No organizer found in meeting metadata - meeting_id={meeting_id}. Tasks without valid owners will use meeting_id as placeholder assignee.")
 
             # Process each action item
             tasks = []
@@ -716,15 +712,32 @@ class MeetingAnalysisOrchestrator:
                     if not assigned_user:
                         assigned_user = organizer_user
 
-                    # Build assignee object with all required fields
-                    assignee = {
-                        "userId": assigned_user.get("id"),
-                        "employeeId": assigned_user.get("employeeId"),
-                        "name": assigned_user.get("name"),
-                        "email": assigned_user.get("email"),
-                        "department": assigned_user.get("department"),
-                        "designation": assigned_user.get("designation")
-                    }
+                    # If still no assignee, create placeholder assignee with meeting_id
+                    if not assigned_user:
+                        meeting_title = meeting_metadata.get('summary', 'Meeting')
+                        assignee = {
+                            "userId": meeting_id,  # Use meeting_id as placeholder
+                            "employeeId": None,
+                            "name": f"Unassigned ({meeting_title})",
+                            "email": None,
+                            "department": None,
+                            "designation": None
+                        }
+                        logger.warning(
+                            f"No valid assignee found for action item '{action_item.task[:50]}...' "
+                            f"(owner: '{action_item.owner}', organizer: {organizer_email or 'None'}), "
+                            f"using meeting_id as placeholder assignee - meeting_id={meeting_id}"
+                        )
+                    else:
+                        # Build assignee object with all required fields from found user
+                        assignee = {
+                            "userId": assigned_user.get("id"),
+                            "employeeId": assigned_user.get("employeeId"),
+                            "name": assigned_user.get("name"),
+                            "email": assigned_user.get("email"),
+                            "department": assigned_user.get("department"),
+                            "designation": assigned_user.get("designation")
+                        }
 
                     # Validate and set priority (default to "medium" for invalid values)
                     valid_priorities = ["low", "medium", "high", "urgent"]
@@ -761,6 +774,9 @@ class MeetingAnalysisOrchestrator:
                 meeting_title = meeting_metadata.get('summary', 'Meeting')
                 meeting_date = meeting_metadata.get('start_time').isoformat() if meeting_metadata.get('start_time') else datetime.now().isoformat()
 
+                # Count placeholder assignees
+                placeholder_count = sum(1 for task in tasks if task.get("assignees") and task["assignees"][0].get("userId") == meeting_id)
+
                 send_task_creation_command(
                     meeting_id=meeting_id,
                     tenant_id=tenant_id,
@@ -770,9 +786,15 @@ class MeetingAnalysisOrchestrator:
                     platform=platform
                 )
 
-                logger.info(f"Successfully published {len(tasks)} tasks to task management system - meeting_id={meeting_id}")
+                if placeholder_count > 0:
+                    logger.info(
+                        f"Successfully published {len(tasks)} tasks to task management system "
+                        f"({placeholder_count} with placeholder assignees awaiting assignment) - meeting_id={meeting_id}"
+                    )
+                else:
+                    logger.info(f"Successfully published {len(tasks)} tasks to task management system - meeting_id={meeting_id}")
             else:
-                logger.warning(f"No tasks were successfully created from action items - meeting_id={meeting_id}")
+                logger.warning(f"No tasks were successfully created from {len(action_items)} action items - meeting_id={meeting_id}")
 
         except Exception as e:
             logger.error(f"Task generation failed - meeting_id={meeting_id}: {str(e)}", exc_info=True)

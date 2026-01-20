@@ -18,7 +18,7 @@ class BaseAnalysisAgent:
         self, 
         prompt: str, 
         system_instruction: Optional[str] = None,
-        model: str = "gemini-2.0-flash", 
+        model: str = "gemini-2.5-flash", 
         temperature: float = 0,
         response_format: Optional[Dict[str, Any]] = None
     ) -> str:

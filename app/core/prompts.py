@@ -2,6 +2,12 @@ TRANSCRIPTION_AND_SENTIMENT_ANALYSIS_PROMPT=""""""
 
 TRANSCRIPTION_AND_SENTIMENT_ANALYSIS_PROMPT_ONLINE = """Transcribe the following audio file and provide accurate, verbatim transcription for each segment.
 
+KNOWN PARTICIPANTS:
+{{participants}}
+
+The audio contains segments corresponding to speaker turns based on Google Meet's speaker detection.
+Use the known participants list above to help identify speakers when possible.
+
 IMPORTANT CONTEXT:
 - This audio chunk represents the time range {{start}} to {{end}} in the full meeting
 - The audio you're receiving starts at 00:00 (beginning of this chunk)
@@ -38,6 +44,12 @@ Please provide the transcription in JSON format with this structure:
 """
 
 TRANSCRIPTION_AND_SENTIMENT_ANALYSIS_PROMPT_OFFLINE = """Transcribe the following audio file and provide accurate, verbatim transcription for each segment. The audio starts from {{start}} and ends at {{end}}.
+
+KNOWN PARTICIPANTS:
+{{participants}}
+
+The audio contains conversation that needs to be segmented based on natural pauses and speaker changes.
+Use the known participants list above to help identify speakers when possible.
 
 TRANSCRIPTION REQUIREMENTS:
 - Create a new transcription entry for each distinct speech segment. A new segment should be started after a natural pause or a period of silence.

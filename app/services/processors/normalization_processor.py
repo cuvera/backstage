@@ -71,6 +71,9 @@ class NormalizationProcessor:
         # Step 7: Validate timestamps
         segments = self._validate_timestamps(segments)
 
+        # Step 8: Ensure all segments have segment_ids (add for offline meetings)
+        segments = self._ensure_segment_ids(segments)
+
         logger.info(
             f"[Normalization] Completed: {original_count} → {len(segments)} segments "
             f"({original_count - len(segments)} removed)"
@@ -328,6 +331,54 @@ class NormalizationProcessor:
             valid.append(segment)
 
         return valid
+
+    def _ensure_segment_ids(self, segments: List[Dict]) -> List[Dict]:
+        """
+        Ensure all segments have segment_ids.
+
+        Strategy:
+        - If ALL segments already have valid segment_ids: Keep them as-is (preserves original reference)
+        - If ANY segment is missing segment_id: Add sequential IDs starting from 1 (offline meetings)
+
+        Args:
+            segments: List of segments
+
+        Returns:
+            Segments with segment_ids populated
+        """
+        if not segments:
+            logger.info("[Normalization] No segments to process for segment_id assignment")
+            return segments
+
+        # Check if all segments have valid segment_ids (not None and not 0)
+        missing_ids = [i for i, seg in enumerate(segments) if seg.get("segment_id") is None or seg.get("segment_id") == 0]
+        existing_ids = [seg.get("segment_id") for seg in segments if seg.get("segment_id") is not None and seg.get("segment_id") != 0]
+
+        logger.info(
+            f"[Normalization] Segment ID check: {len(segments)} total segments, "
+            f"{len(missing_ids)} missing/invalid segment_ids, "
+            f"sample existing IDs: {sorted(existing_ids)[:10] if existing_ids else 'None'}"
+        )
+
+        if not missing_ids:
+            # All segments have valid IDs (not 0, not None) - preserve them (online meetings)
+            logger.info(
+                f"[Normalization] All {len(segments)} segments have valid segment_ids, preserving original IDs "
+                f"(sample: {sorted(existing_ids)[:10]})"
+            )
+            return segments
+
+        # Some or all segments missing/invalid IDs (None or 0) - assign sequential IDs
+        logger.info(
+            f"[Normalization] {len(missing_ids)}/{len(segments)} segments have missing/invalid segment_ids, "
+            f"assigning sequential IDs 1-{len(segments)}"
+        )
+
+        for idx, segment in enumerate(segments, start=1):
+            segment["segment_id"] = idx
+
+        logger.info(f"[Normalization] Assigned segment_ids 1-{len(segments)} to all segments")
+        return segments
 
     @staticmethod
     def _ends_with_punctuation(text: str) -> bool:

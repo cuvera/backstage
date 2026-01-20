@@ -97,6 +97,7 @@ class SegmentClassificationProcessor:
         # Log available segment_ids for debugging
         segment_ids_available = [seg.get("segment_id") for seg in segments]
         logger.info(f"[Classification] Available segment_ids: {len(segment_ids_available)} segments")
+        logger.info(f"[Classification] Available segment_ids (first 20): {sorted(segment_ids_available)[:20]}")
         logger.debug(f"[Classification] Segment IDs: {segment_ids_available[:20]}... (showing first 20)")
 
         # Build classification prompt
@@ -138,12 +139,16 @@ class SegmentClassificationProcessor:
                 seg_ids = cluster.get("segment_ids", [])
                 llm_segment_ids.update(seg_ids)
 
+            logger.info(f"[Classification] LLM returned segment_ids (first 30): {sorted(llm_segment_ids)[:30]}")
             logger.debug(f"[Classification] LLM returned segment_ids: {sorted(llm_segment_ids)[:30]}... (showing first 30)")
 
             # Check for segment_ids not in available set
             invalid_ids = llm_segment_ids - set(segment_ids_available)
             if invalid_ids:
-                logger.warning(f"[Classification] LLM returned {len(invalid_ids)} invalid segment_ids not in normalized transcript: {sorted(invalid_ids)[:20]}")
+                logger.warning(
+                    f"[Classification] LLM returned {len(invalid_ids)} invalid segment_ids not in normalized transcript: "
+                    f"{sorted(invalid_ids)[:20]}. Available IDs: {sorted(segment_ids_available)[:20]}"
+                )
 
             return clusters
 

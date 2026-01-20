@@ -395,7 +395,7 @@ class LLMClient:
     def _default_provider_chain(self):
         return [
           {"provider": "gemini", "model": "gemini-2.5-flash", "timeout": 60, "max_tokens": 24000},
-          {"provider": "openai", "model": "gpt-3.0-flash", "timeout": 90, "max_tokens": 44000},
+          {"provider": "gemini", "model": "gemini-3-flash-preview", "timeout": 90, "max_tokens": 44000},
           {"provider": "gemini", "model": "gemini-2.5-pro", "max_tokens": 65000},
       ]
 
