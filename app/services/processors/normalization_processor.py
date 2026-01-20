@@ -75,11 +75,11 @@ class NormalizationProcessor:
             f"[Normalization] Completed: {original_count} → {len(segments)} segments "
             f"({original_count - len(segments)} removed)"
         )
-
-        # write segments to a json file
-        import json
-        with open("normalized_segments.json", "w") as f:
-            json.dump(segments, f, indent=4)
+        logger.debug(
+            f"[Normalization] Normalized segments summary: "
+            f"speakers={len(set(s.get('speaker', 'Unknown') for s in segments))}, "
+            f"total_duration={segments[-1].get('end', 0) if segments else 0}s"
+        )
 
         return {
             "transcriptions": segments,

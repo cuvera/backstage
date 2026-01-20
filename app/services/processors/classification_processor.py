@@ -148,25 +148,23 @@ class SegmentClassificationProcessor:
             return clusters
 
         except json.JSONDecodeError as e:
-            logger.error(f"[Classification] Failed to parse LLM response: {e}")
-            logger.error(f"[Classification] Response length: {len(response_text)} characters")
+            logger.error(
+                f"[Classification] Failed to parse LLM response: {e} | "
+                f"response_length={len(response_text)} characters"
+            )
 
-            # Dump response to file for debugging
-            try:
-                import os
-                os.makedirs("data/debug", exist_ok=True)
-                debug_file = f"data/debug/llm_response_error_{hash(response_text) % 100000}.txt"
-                with open(debug_file, "w") as f:
-                    f.write("=== LLM RESPONSE (FAILED TO PARSE) ===\n\n")
-                    f.write(response_text)
-                    f.write(f"\n\n=== ERROR ===\n{e}")
-                logger.error(f"[Classification] Dumped response to: {debug_file}")
-            except Exception as dump_error:
-                logger.error(f"[Classification] Failed to dump response: {dump_error}")
-
-            # Log first and last 500 chars for quick inspection
-            logger.error(f"[Classification] Response start: {response_text[:500]}")
-            logger.error(f"[Classification] Response end: {response_text[-500:]}")
+            # Log response excerpts for debugging (no file writes)
+            logger.error(
+                f"[Classification] Response preview (first 500 chars): "
+                f"{response_text[:500]}"
+            )
+            logger.error(
+                f"[Classification] Response preview (last 500 chars): "
+                f"{response_text[-500:]}"
+            )
+            logger.debug(
+                f"[Classification] Full response: {response_text}"
+            )
 
             return []
 
