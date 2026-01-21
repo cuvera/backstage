@@ -1,7 +1,7 @@
 import logging
 import os
 import tempfile
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import time
 from datetime import datetime
 import shutil
@@ -14,6 +14,7 @@ from app.utils.audio_merger import find_files_from_s3, list_files_in_s3_folder
 from app.services.meeting_analysis_service import MeetingAnalysisService
 from app.repository import MeetingMetadataRepository
 from app.repository.transcription_v1_repository import TranscriptionV1Repository
+from app.repository.transcription_v2_repository import TranscriptionV2Repository
 from app.utils.s3_client import download_s3_file
 from app.core.config import settings
 from app.services.agents import TranscriptionAgent, CallAnalysisAgent
@@ -21,6 +22,10 @@ from app.services.meeting_prep_curator_service import MeetingPrepCuratorService
 from app.messaging.producers.meeting_status_producer import send_meeting_status
 from app.messaging.producers.email_notification_producer import send_email_notification
 from app.messaging.producers.meeting_embedding_ready_producer import send_meeting_embedding_ready
+from app.messaging.producers.task_commands_producer import send_task_creation_command
+from app.services.transcription_v2_service import transcription_v2_service
+from app.services.adapters.transcription_v1_to_v2_adapter import transcription_v1_to_v2_adapter
+from app.services.agents.call_analysis.coordinator import CallAnalysisCoordinator
 from app.utils.auth_service_client import AuthServiceClient
 
 logger = logging.getLogger(__name__)
@@ -133,9 +138,9 @@ class MeetingAnalysisOrchestrator:
             step_duration_ms = round((time.time() - step_start_time) * 1000, 2)
             logger.info(f"Step 0 completed in {step_duration_ms}ms - meeting_id={meeting_id}")
 
-            #################################################
-            # Step 1: Transcription with TranscriptionService v1
-            #################################################
+            ######################################################
+            # Step 1: Transcription with TranscriptionService v1 #
+            ######################################################
             step_start_time = time.time()
             logger.info(f"Step 1: Starting transcription process - meeting_id={meeting_id}")
 
@@ -242,6 +247,52 @@ class MeetingAnalysisOrchestrator:
             logger.debug("Waiting for 1 seconds before analysis...")
             await asyncio.sleep(1);
 
+            ########################################################
+            # Step 1.2: Transcription with TranscriptionService v2 #
+            ########################################################
+            logger.info(f"[Orchestrator] Step 1.2: Processing transcription V2 for meeting {meeting_id}")
+
+            # Initialize V2 repository
+            transcription_v2_repo = await TranscriptionV2Repository.from_default()
+
+            # Check if V2 already exists in database
+            existing_v2_doc = await transcription_v2_repo.get_by_meeting_id(
+                meeting_id=meeting_id,
+                tenant_id=tenant_id
+            )
+
+            if existing_v2_doc:
+                logger.info(f"[Orchestrator] Transcription V2 already exists in database, skipping processing")
+                # Use existing V2 from database
+                transcription_v2 = {
+                    "segments": [segment.model_dump() for segment in existing_v2_doc.segments],
+                    "metadata": existing_v2_doc.metadata.model_dump()
+                }
+                v2 = {"transcription_v2": transcription_v2}
+            else:
+                logger.info(f"[Orchestrator] Transcription V2 not found, processing from V1")
+                # Transform V1 to V2 format
+                v2_transcription_input = transcription_v1_to_v2_adapter.transform(transcription)
+
+                # Process V2 transcription (normalization + classification)
+                v2 = await transcription_v2_service.process_and_publish(
+                    v1_transcription=v2_transcription_input,
+                    meeting_id=meeting_id,
+                    tenant_id=tenant_id,
+                    platform=original_platform
+                )
+
+                # Save transcription V2 to database
+                transcription_v2 = v2.get("transcription_v2")
+                if transcription_v2:
+                    logger.info(f"[Orchestrator] Saving transcription V2 to database")
+                    await transcription_v2_repo.save_transcription(
+                        meeting_id=meeting_id,
+                        tenant_id=tenant_id,
+                        transcription_v2=transcription_v2
+                    )
+                    logger.info(f"[Orchestrator] Transcription V2 saved successfully")
+
             #################################################
             # Step 2: Meeting Analysis with CallAnalysisAgent
             #################################################
@@ -252,19 +303,22 @@ class MeetingAnalysisOrchestrator:
             analysis_doc = await analysis_service.get_analysis(tenant_id=tenant_id, session_id=meeting_id)
 
             if not analysis_doc:
-                call_analysis_agent = CallAnalysisAgent()
-
-                analysis = await call_analysis_agent.analyze(
-                        transcript_payload=transcription,
-                        context={
-                            "tenant_id": tenant_id,
-                            "session_id": meeting_id,
-                            "platform": platform,
-                            "meeting_title": meeting_metadata.get("summary"),
-                            "start_time": meeting_metadata.get("start_time"),
-                            "end_time": meeting_metadata.get("end_time")
+                transcription_v2 = v2.get("transcription_v2");
+                analysis_coordinator = CallAnalysisCoordinator()
+                
+                logger.info(f"Step 2.1: Calling analysis coordinator (internal retry enabled) - meeting_id={meeting_id}")
+                
+                analysis_data = await analysis_coordinator.analyze_meeting(
+                    meeting_id=meeting_id,
+                    tenant_id=tenant_id,
+                    v2_transcript=transcription_v2,  # The V2 payload
+                    metadata={
+                    "title": meeting_metadata.get("summary"),
+                    "platform": platform,
+                    "participants": meeting_metadata.get("attendees")
                     }
                 )
+                analysis = MeetingAnalysis(**analysis_data)
 
                 logger.info(f"Step 2.1: Saving meeting analysis - meeting_id={meeting_id}")
                 await analysis_service.save_analysis(analysis)
@@ -274,7 +328,18 @@ class MeetingAnalysisOrchestrator:
             
             step_duration_ms = round((time.time() - step_start_time) * 1000, 2)
             logger.info(f"Step 2 completed in {step_duration_ms}ms - meeting_id={meeting_id}")
-            
+
+            # Generate tasks from action items
+            # Determine platform type: offline if platform is "offline", otherwise online
+            platform_type = "offline" if original_platform == "offline" else "online"
+            await self._generate_tasks_from_action_items(
+                meeting_id=meeting_id,
+                tenant_id=tenant_id,
+                analysis=analysis,
+                meeting_metadata=meeting_metadata,
+                platform=platform_type
+            )
+
             logger.debug("Waiting for 1 seconds before meeting preparation...")
             await asyncio.sleep(1)
 
@@ -542,6 +607,185 @@ class MeetingAnalysisOrchestrator:
             'temp_directory': str(temp_dir)
         }
 
+    def _is_valid_iso_date(self, date_str: Optional[str]) -> bool:
+        """
+        Check if a date string is in valid ISO 8601 format.
+
+        Args:
+            date_str: Date string to validate
+
+        Returns:
+            True if valid ISO format, False otherwise
+        """
+        if not date_str or not isinstance(date_str, str):
+            return False
+
+        try:
+            from datetime import datetime
+            # Try parsing ISO format (YYYY-MM-DD or full datetime with T)
+            if 'T' in date_str:
+                datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+            else:
+                datetime.strptime(date_str, '%Y-%m-%d')
+            return True
+        except (ValueError, AttributeError):
+            return False
+
+    async def _generate_tasks_from_action_items(
+        self,
+        meeting_id: str,
+        tenant_id: str,
+        analysis: MeetingAnalysis,
+        meeting_metadata: Dict[str, Any],
+        platform: str
+    ) -> None:
+        """
+        Generate tasks from meeting action items and publish to task management system.
+
+        Args:
+            meeting_id: Meeting identifier
+            tenant_id: Tenant identifier
+            analysis: Meeting analysis containing action items
+            meeting_metadata: Meeting metadata from repository
+            platform: Platform type ("online" or "offline")
+        """
+        try:
+            # Extract action items
+            action_items = analysis.action_items
+            if not action_items or len(action_items) == 0:
+                logger.info(f"No action items found, skipping task generation - meeting_id={meeting_id}")
+                return
+
+            logger.info(f"Starting task generation for {len(action_items)} action items - meeting_id={meeting_id}")
+
+            # Get organizer information (optional - used as fallback for tasks without owners)
+            auth_client = AuthServiceClient()
+            organizer_user = None
+            organizer_email = meeting_metadata.get('organizer')
+
+            if organizer_email:
+                try:
+                    organizer_users = await auth_client.search_users(organizer_email, tenant_id=tenant_id, limit=1)
+                    if organizer_users and len(organizer_users) > 0:
+                        organizer_user = organizer_users[0]
+                        logger.info(f"Found organizer user: {organizer_user.get('name')} - meeting_id={meeting_id}")
+                    else:
+                        logger.warning(f"Organizer not found in auth service: {organizer_email} - meeting_id={meeting_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to fetch organizer from auth service - meeting_id={meeting_id}: {e}")
+            else:
+                logger.warning(f"No organizer found in meeting metadata - meeting_id={meeting_id}. Tasks without valid owners will use meeting_id as placeholder assignee.")
+
+            # Process each action item
+            tasks = []
+            for idx, action_item in enumerate(action_items):
+                try:
+                    assigned_user = None
+
+                    # Try to find user by owner name if provided
+                    if action_item.owner and action_item.owner.strip():
+                        try:
+                            owner_users = await auth_client.search_users(action_item.owner, tenant_id=tenant_id, limit=1)
+                            if owner_users and len(owner_users) > 0:
+                                assigned_user = owner_users[0]
+                                logger.info(f"Matched owner '{action_item.owner}' to user {assigned_user.get('name')} - meeting_id={meeting_id}")
+                            else:
+                                logger.info(f"No user found for owner '{action_item.owner}', using organizer - meeting_id={meeting_id}")
+                        except Exception as e:
+                            logger.warning(f"Failed to search user '{action_item.owner}' - meeting_id={meeting_id}: {e}")
+
+                    # Fallback to organizer if no user found
+                    if not assigned_user:
+                        assigned_user = organizer_user
+
+                    # If still no assignee, create placeholder assignee with meeting_id
+                    if not assigned_user:
+                        meeting_title = meeting_metadata.get('summary', 'Meeting')
+                        assignee = {
+                            "userId": meeting_id,  # Use meeting_id as placeholder
+                            "employeeId": None,
+                            "name": f"Unassigned ({meeting_title})",
+                            "email": None,
+                            "department": None,
+                            "designation": None
+                        }
+                        logger.warning(
+                            f"No valid assignee found for action item '{action_item.task[:50]}...' "
+                            f"(owner: '{action_item.owner}', organizer: {organizer_email or 'None'}), "
+                            f"using meeting_id as placeholder assignee - meeting_id={meeting_id}"
+                        )
+                    else:
+                        # Build assignee object with all required fields from found user
+                        assignee = {
+                            "userId": assigned_user.get("id"),
+                            "employeeId": assigned_user.get("employeeId"),
+                            "name": assigned_user.get("name"),
+                            "email": assigned_user.get("email"),
+                            "department": assigned_user.get("department"),
+                            "designation": assigned_user.get("designation")
+                        }
+
+                    # Validate and set priority (default to "medium" for invalid values)
+                    valid_priorities = ["low", "medium", "high", "urgent"]
+                    priority = "medium"  # default
+                    if action_item.priority:
+                        priority_str = str(action_item.priority).lower().strip()
+                        if priority_str in valid_priorities:
+                            priority = priority_str
+                        else:
+                            logger.warning(f"Invalid priority '{action_item.priority}' for action item, using default 'medium' - meeting_id={meeting_id}")
+
+                    # Build task object
+                    task = {
+                        "title": action_item.task[:200] if len(action_item.task) > 200 else action_item.task,
+                        "description": action_item.task,
+                        "assignees": [assignee],
+                        "priority": priority,
+                        "tags": []
+                    }
+
+                    # Add due date only if valid ISO format
+                    if self._is_valid_iso_date(action_item.due_date):
+                        task["dueDate"] = action_item.due_date
+
+                    tasks.append(task)
+                    logger.debug(f"Created task {idx + 1}/{len(action_items)} - meeting_id={meeting_id}")
+
+                except Exception as e:
+                    logger.error(f"Failed to process action item {idx + 1} - meeting_id={meeting_id}: {e}", exc_info=True)
+                    continue
+
+            # Publish tasks if any were successfully created
+            if tasks:
+                meeting_title = meeting_metadata.get('summary', 'Meeting')
+                meeting_date = meeting_metadata.get('start_time').isoformat() if meeting_metadata.get('start_time') else datetime.now().isoformat()
+
+                # Count placeholder assignees
+                placeholder_count = sum(1 for task in tasks if task.get("assignees") and task["assignees"][0].get("userId") == meeting_id)
+
+                send_task_creation_command(
+                    meeting_id=meeting_id,
+                    tenant_id=tenant_id,
+                    meeting_title=meeting_title,
+                    meeting_date=meeting_date,
+                    tasks=tasks,
+                    platform=platform
+                )
+
+                if placeholder_count > 0:
+                    logger.info(
+                        f"Successfully published {len(tasks)} tasks to task management system "
+                        f"({placeholder_count} with placeholder assignees awaiting assignment) - meeting_id={meeting_id}"
+                    )
+                else:
+                    logger.info(f"Successfully published {len(tasks)} tasks to task management system - meeting_id={meeting_id}")
+            else:
+                logger.warning(f"No tasks were successfully created from {len(action_items)} action items - meeting_id={meeting_id}")
+
+        except Exception as e:
+            logger.error(f"Task generation failed - meeting_id={meeting_id}: {str(e)}", exc_info=True)
+            # Don't raise - task generation failure should not fail the entire meeting analysis
+
     async def _send_meeting_completion_email(
         self,
         meeting_id: str,
@@ -583,7 +827,7 @@ class MeetingAnalysisOrchestrator:
             user_mapping = []
             try:
                 auth_client = AuthServiceClient()
-                user_details = await auth_client.fetch_users_by_emails(list(all_emails))
+                user_details = await auth_client.fetch_users_by_emails(list(all_emails), tenant_id=tenant_id)
                 user_mapping = auth_client.create_user_email_mapping(user_details)
                 logger.info(f"Successfully fetched user details for {len(user_mapping)} users")
             except Exception as e:
