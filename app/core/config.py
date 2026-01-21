@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     
     DEFAULT_LLM_PROVIDER: str = Field(default="gemini", env="DEFAULT_LLM_PROVIDER")
     DEFAULT_LLM_MODEL: str = Field(default="gemini-2.5-flash", env="DEFAULT_LLM_MODEL")
+    # Supports: model names (gemini-2.5-flash), provider names (gemini), or mixed
+    LLM_FALLBACK_CHAIN: str = Field(default="gemini-2.5-pro,gemini-3.0-flash-preview,gpt-4.1", env="LLM_FALLBACK_CHAIN")
+    LLM_TIMEOUT: float = Field(default=1200.0, env="LLM_TIMEOUT")
+    LLM_MAX_RETRIES: int = Field(default=3, env="LLM_MAX_RETRIES")
     
     OPENAI_API_KEY: Optional[str] = Field(default=None, env="OPENAI_API_KEY")
     WHISPER_MODEL_SIZE: str = Field(default="tiny", env="WHISPER_MODEL_SIZE")
@@ -83,6 +87,7 @@ class Settings(BaseSettings):
     RABBITMQ_BACKSTAGE_RETRY_QUEUE: str = Field(default="meetings.analysis.retry", env="RABBITMQ_BACKSTAGE_RETRY_QUEUE")
     RABBITMQ_RECORDER_COMPLETED_QUEUE: str = Field(default="meetings.recorder.completed.v1", env="RABBITMQ_RECORDER_COMPLETED_QUEUE")
     EMAIL_NOTIFICATIONS_ROUTING_KEY: str = Field(default="dev.integration.email.notifications.v1", env="EMAIL_NOTIFICATIONS_ROUTING_KEY")
+    TASK_COMMANDS_QUEUE: str = Field(default="task-management.task-commands", env="TASK_COMMANDS_QUEUE")
     MEETING_BUCKET_NAME: str = Field(default="recordings", env="MEETING_BUCKET_NAME")
 
     # Scheduler configuration
