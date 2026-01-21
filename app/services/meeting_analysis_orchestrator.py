@@ -303,20 +303,6 @@ class MeetingAnalysisOrchestrator:
             analysis_doc = await analysis_service.get_analysis(tenant_id=tenant_id, session_id=meeting_id)
 
             if not analysis_doc:
-                # call_analysis_agent = CallAnalysisAgent()
-
-                # analysis = await call_analysis_agent.analyze(
-                #         transcript_payload=transcription,
-                #         context={
-                #             "tenant_id": tenant_id,
-                #             "session_id": meeting_id,
-                #             "platform": platform,
-                #             "meeting_title": meeting_metadata.get("summary"),
-                #             "start_time": meeting_metadata.get("start_time"),
-                #             "end_time": meeting_metadata.get("end_time")
-                #     }
-                # )
-
                 transcription_v2 = v2.get("transcription_v2");
                 analysis_coordinator = CallAnalysisCoordinator()
                 
