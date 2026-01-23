@@ -11,22 +11,13 @@ import asyncio
 from app.schemas.meeting_analysis import MeetingAnalysis
 from app.services.transcription_service import TranscriptionService
 from app.utils.audio_merger import find_files_from_s3, list_files_in_s3_folder
-from app.services.meeting_analysis_service import MeetingAnalysisService
 from app.repository import MeetingMetadataRepository
 from app.repository.transcription_v1_repository import TranscriptionV1Repository
 from app.repository.transcription_v2_repository import TranscriptionV2Repository
 from app.utils.s3_client import download_s3_file
 from app.core.config import settings
-from app.services.agents import TranscriptionAgent, CallAnalysisAgent
-from app.services.meeting_prep_curator_service import MeetingPrepCuratorService
-from app.messaging.producers.meeting_status_producer import send_meeting_status
-from app.messaging.producers.email_notification_producer import send_email_notification
-from app.messaging.producers.meeting_embedding_ready_producer import send_meeting_embedding_ready
-from app.messaging.producers.task_commands_producer import send_task_creation_command
 from app.services.transcription_v2_service import transcription_v2_service
 from app.services.adapters.transcription_v1_to_v2_adapter import transcription_v1_to_v2_adapter
-from app.services.agents.call_analysis.coordinator import CallAnalysisCoordinator
-from app.utils.auth_service_client import AuthServiceClient
 
 logger = logging.getLogger(__name__)
 
@@ -108,8 +99,6 @@ class MeetingAnalysisOrchestrator:
             step_start_time = time.time()
             logger.info(f"Step 0: Preparing meeting context - meeting_id={meeting_id}")
 
-            await self._update_meeting_status(meeting_id, original_platform, 'analysing', tenant_id)
-
             if platform == "google":
                 if not self.meeting_metadata_repo:
                     self.meeting_metadata_repo = await MeetingMetadataRepository.from_default()
@@ -129,7 +118,6 @@ class MeetingAnalysisOrchestrator:
                     )
 
                     if next_meeting:
-                        await self._update_meeting_status(next_meeting, original_platform, 'analysing', tenant_id)
                         logger.info(f"Next meeting identified for prep pack - next_meeting_id={next_meeting}")
             else:
                 meeting_metadata = {}
@@ -292,117 +280,13 @@ class MeetingAnalysisOrchestrator:
                         transcription_v2=transcription_v2
                     )
                     logger.info(f"[Orchestrator] Transcription V2 saved successfully")
-
-            #################################################
-            # Step 2: Meeting Analysis with CallAnalysisAgent
-            #################################################
-            step_start_time = time.time()
-            logger.info(f"Step 2: Starting meeting analysis - meeting_id={meeting_id}")
-
-            analysis_service = await MeetingAnalysisService.from_default()
-            analysis_doc = await analysis_service.get_analysis(tenant_id=tenant_id, session_id=meeting_id)
-
-            if not analysis_doc:
-                transcription_v2 = v2.get("transcription_v2");
-                analysis_coordinator = CallAnalysisCoordinator()
                 
-                logger.info(f"Step 2.1: Calling analysis coordinator (internal retry enabled) - meeting_id={meeting_id}")
-                
-                analysis_data = await analysis_coordinator.analyze_meeting(
-                    meeting_id=meeting_id,
-                    tenant_id=tenant_id,
-                    v2_transcript=transcription_v2,  # The V2 payload
-                    metadata={
-                    "title": meeting_metadata.get("summary"),
-                    "platform": platform,
-                    "participants": meeting_metadata.get("attendees")
-                    }
-                )
-                analysis = MeetingAnalysis(**analysis_data)
-
-                logger.info(f"Step 2.1: Saving meeting analysis - meeting_id={meeting_id}")
-                await analysis_service.save_analysis(analysis)
-            else:
-                analysis = MeetingAnalysis(**analysis_doc)
-                logger.info(f"Step 2: Using existing analysis - meeting_id={meeting_id}")
-            
-            step_duration_ms = round((time.time() - step_start_time) * 1000, 2)
-            logger.info(f"Step 2 completed in {step_duration_ms}ms - meeting_id={meeting_id}")
-
-            # Generate tasks from action items
-            # Determine platform type: offline if platform is "offline", otherwise online
-            platform_type = "offline" if original_platform == "offline" else "online"
-            await self._generate_tasks_from_action_items(
-                meeting_id=meeting_id,
-                tenant_id=tenant_id,
-                analysis=analysis,
-                meeting_metadata=meeting_metadata,
-                platform=platform_type
-            )
-
-            logger.debug("Waiting for 1 seconds before meeting preparation...")
-            await asyncio.sleep(1)
-
-            ############################################################
-            # Step 3: Meeting Preparation with MeetingPrepCuratorService
-            ############################################################
-            step_start_time = time.time()
-            logger.info(f"Step 3: Starting meeting preparation - meeting_id={meeting_id}")
-            if recurring_meeting_id and next_meeting:
-                prep_curator_service = await MeetingPrepCuratorService.from_default()
-                await prep_curator_service.generate_and_save_prep_pack(
-                    next_meeting_id=next_meeting,
-                    meeting_analysis=analysis,
-                    meeting_metadata=meeting_metadata,
-                    platform=original_platform,
-                    recurring_meeting_id=recurring_meeting_id,
-                    previous_meeting_counts=2,
-                    context={
-                        "current_meeting_id": meeting_id,
-                        "tenant_id": tenant_id
-                    }
-                )
-
-                await self._update_meeting_status(next_meeting, original_platform, 'scheduled', tenant_id)
-                logger.info(f"Meeting prep pack generated successfully - next_meeting_id={next_meeting}")
-            else:
-                logger.info(f"Skipping meeting preparation - missing requirements - meeting_id={meeting_id}")
-            
-            step_duration_ms = round((time.time() - step_start_time) * 1000, 2)
-            logger.info(f"Step 3 completed in {step_duration_ms}ms - meeting_id={meeting_id}")
-
-            # Update meeting status to completed on success
-            await self._update_meeting_status(meeting_id, original_platform, 'completed', tenant_id)
-            
-            # Step 4: Send email notification
-            await self._send_meeting_completion_email(
-                meeting_id=meeting_id,
-                tenant_id=tenant_id,
-                analysis=analysis,
-                meeting_metadata=meeting_metadata,
-                transcription=transcription
-            )
-
-            # Step 5: Send meeting embedding ready event
-            send_meeting_embedding_ready(
-                meeting_id=meeting_id,
-                tenant_id=tenant_id,
-                platform=original_platform
-            )
-
             total_duration_ms = round((time.time() - overall_start_time) * 1000, 2)
             logger.info(f"Meeting analysis completed successfully in {total_duration_ms}ms - meeting_id={meeting_id}, tenant_id={tenant_id}")
             return True
 
         except Exception as e:
-            logger.error(f"Meeting processing failed - meeting_id={meeting_id}, tenant_id={tenant_id}: {str(e)}", exc_info=True)
-
-            if meeting_id and original_platform:
-                await self._update_meeting_status(str(meeting_id), original_platform, 'failed', tenant_id)
-
-                if next_meeting:
-                    await self._update_meeting_status(next_meeting, original_platform, 'scheduled', tenant_id)
-            
+            logger.error(f"Meeting processing failed - meeting_id={meeting_id}, tenant_id={tenant_id}: {str(e)}", exc_info=True)            
             raise MeetingAnalysisOrchestratorError(f"Meeting processing failed: {str(e)}") from e
         finally:
             cleanup_start_time = time.time()
@@ -424,30 +308,6 @@ class MeetingAnalysisOrchestrator:
                     logger.info(f"Temporary resources cleaned up - meeting_id={meeting_id}")
             except Exception as e:
                 logger.error(f"Failed to clean up temporary resources - meeting_id={meeting_id}: {str(e)}", exc_info=True)
-
-    async def _update_meeting_status(self, meeting_id: str, platform: str, status: str, tenant_id: str = None) -> None:
-        """Update meeting status in metadata repository for supported platforms."""
-        try:
-            if platform == "google":
-                if not self.meeting_metadata_repo:
-                    self.meeting_metadata_repo = await MeetingMetadataRepository.from_default()
-
-                await self.meeting_metadata_repo.update_meeting_status(meeting_id, platform, status)
-                logger.info(f"Updated meeting {meeting_id} status to {status} for platform {platform}")
-            elif platform == "offline":
-                # Map internal status to RabbitMQ status
-                send_meeting_status(
-                    meeting_id=meeting_id,
-                    status=status,
-                    platform=platform,
-                    tenant_id=tenant_id,
-                    session_id=meeting_id
-                )
-                logger.info(f"Sent offline meeting {meeting_id} status {meeting_id}")
-            else:
-                logger.info(f"Status update not supported for platform {platform}, meeting {meeting_id} would be {status}")
-        except Exception as e:
-            logger.warning(f"Failed to update meeting status to {status} for meeting {meeting_id}: {e}")
 
     async def _convert_to_m4a(self, input_file_path: str, temp_dir: str) -> str:
         """
@@ -630,266 +490,3 @@ class MeetingAnalysisOrchestrator:
             return True
         except (ValueError, AttributeError):
             return False
-
-    async def _generate_tasks_from_action_items(
-        self,
-        meeting_id: str,
-        tenant_id: str,
-        analysis: MeetingAnalysis,
-        meeting_metadata: Dict[str, Any],
-        platform: str
-    ) -> None:
-        """
-        Generate tasks from meeting action items and publish to task management system.
-
-        Args:
-            meeting_id: Meeting identifier
-            tenant_id: Tenant identifier
-            analysis: Meeting analysis containing action items
-            meeting_metadata: Meeting metadata from repository
-            platform: Platform type ("online" or "offline")
-        """
-        try:
-            # Extract action items
-            action_items = analysis.action_items
-            if not action_items or len(action_items) == 0:
-                logger.info(f"No action items found, skipping task generation - meeting_id={meeting_id}")
-                return
-
-            logger.info(f"Starting task generation for {len(action_items)} action items - meeting_id={meeting_id}")
-
-            # Get organizer information (optional - used as fallback for tasks without owners)
-            auth_client = AuthServiceClient()
-            organizer_user = None
-            organizer_email = meeting_metadata.get('organizer')
-
-            if organizer_email:
-                try:
-                    organizer_users = await auth_client.search_users(organizer_email, tenant_id=tenant_id, limit=1)
-                    if organizer_users and len(organizer_users) > 0:
-                        organizer_user = organizer_users[0]
-                        logger.info(f"Found organizer user: {organizer_user.get('name')} - meeting_id={meeting_id}")
-                    else:
-                        logger.warning(f"Organizer not found in auth service: {organizer_email} - meeting_id={meeting_id}")
-                except Exception as e:
-                    logger.warning(f"Failed to fetch organizer from auth service - meeting_id={meeting_id}: {e}")
-            else:
-                logger.warning(f"No organizer found in meeting metadata - meeting_id={meeting_id}. Tasks without valid owners will use meeting_id as placeholder assignee.")
-
-            # Process each action item
-            tasks = []
-            for idx, action_item in enumerate(action_items):
-                try:
-                    assigned_user = None
-
-                    # Try to find user by owner name if provided
-                    if action_item.owner and action_item.owner.strip():
-                        try:
-                            owner_users = await auth_client.search_users(action_item.owner, tenant_id=tenant_id, limit=1)
-                            if owner_users and len(owner_users) > 0:
-                                assigned_user = owner_users[0]
-                                logger.info(f"Matched owner '{action_item.owner}' to user {assigned_user.get('name')} - meeting_id={meeting_id}")
-                            else:
-                                logger.info(f"No user found for owner '{action_item.owner}', using organizer - meeting_id={meeting_id}")
-                        except Exception as e:
-                            logger.warning(f"Failed to search user '{action_item.owner}' - meeting_id={meeting_id}: {e}")
-
-                    # Fallback to organizer if no user found
-                    if not assigned_user:
-                        assigned_user = organizer_user
-
-                    # If still no assignee, create placeholder assignee with meeting_id
-                    if not assigned_user:
-                        meeting_title = meeting_metadata.get('summary', 'Meeting')
-                        assignee = {
-                            "userId": meeting_id,  # Use meeting_id as placeholder
-                            "employeeId": None,
-                            "name": f"Unassigned ({meeting_title})",
-                            "email": None,
-                            "department": None,
-                            "designation": None
-                        }
-                        logger.warning(
-                            f"No valid assignee found for action item '{action_item.task[:50]}...' "
-                            f"(owner: '{action_item.owner}', organizer: {organizer_email or 'None'}), "
-                            f"using meeting_id as placeholder assignee - meeting_id={meeting_id}"
-                        )
-                    else:
-                        # Build assignee object with all required fields from found user
-                        assignee = {
-                            "userId": assigned_user.get("id"),
-                            "employeeId": assigned_user.get("employeeId"),
-                            "name": assigned_user.get("name"),
-                            "email": assigned_user.get("email"),
-                            "department": assigned_user.get("department"),
-                            "designation": assigned_user.get("designation")
-                        }
-
-                    # Validate and set priority (default to "medium" for invalid values)
-                    valid_priorities = ["low", "medium", "high", "urgent"]
-                    priority = "medium"  # default
-                    if action_item.priority:
-                        priority_str = str(action_item.priority).lower().strip()
-                        if priority_str in valid_priorities:
-                            priority = priority_str
-                        else:
-                            logger.warning(f"Invalid priority '{action_item.priority}' for action item, using default 'medium' - meeting_id={meeting_id}")
-
-                    # Build task object
-                    task = {
-                        "title": action_item.task[:200] if len(action_item.task) > 200 else action_item.task,
-                        "description": action_item.task,
-                        "assignees": [assignee],
-                        "priority": priority,
-                        "tags": []
-                    }
-
-                    # Add due date only if valid ISO format
-                    if self._is_valid_iso_date(action_item.due_date):
-                        task["dueDate"] = action_item.due_date
-
-                    tasks.append(task)
-                    logger.debug(f"Created task {idx + 1}/{len(action_items)} - meeting_id={meeting_id}")
-
-                except Exception as e:
-                    logger.error(f"Failed to process action item {idx + 1} - meeting_id={meeting_id}: {e}", exc_info=True)
-                    continue
-
-            # Publish tasks if any were successfully created
-            if tasks:
-                meeting_title = meeting_metadata.get('summary', 'Meeting')
-                meeting_date = meeting_metadata.get('start_time').isoformat() if meeting_metadata.get('start_time') else datetime.now().isoformat()
-
-                # Count placeholder assignees
-                placeholder_count = sum(1 for task in tasks if task.get("assignees") and task["assignees"][0].get("userId") == meeting_id)
-
-                send_task_creation_command(
-                    meeting_id=meeting_id,
-                    tenant_id=tenant_id,
-                    meeting_title=meeting_title,
-                    meeting_date=meeting_date,
-                    tasks=tasks,
-                    platform=platform
-                )
-
-                if placeholder_count > 0:
-                    logger.info(
-                        f"Successfully published {len(tasks)} tasks to task management system "
-                        f"({placeholder_count} with placeholder assignees awaiting assignment) - meeting_id={meeting_id}"
-                    )
-                else:
-                    logger.info(f"Successfully published {len(tasks)} tasks to task management system - meeting_id={meeting_id}")
-            else:
-                logger.warning(f"No tasks were successfully created from {len(action_items)} action items - meeting_id={meeting_id}")
-
-        except Exception as e:
-            logger.error(f"Task generation failed - meeting_id={meeting_id}: {str(e)}", exc_info=True)
-            # Don't raise - task generation failure should not fail the entire meeting analysis
-
-    async def _send_meeting_completion_email(
-        self,
-        meeting_id: str,
-        tenant_id: str,
-        analysis: MeetingAnalysis,
-        meeting_metadata: Dict[str, Any],
-        transcription: Dict[str, Any]
-    ) -> None:
-        """
-        Send email notification to meeting participants after analysis completion.
-        
-        Args:
-            meeting_id: Meeting identifier
-            tenant_id: Tenant identifier
-            analysis: Meeting analysis results
-            meeting_metadata: Meeting metadata from repository
-            transcription: Meeting transcription data
-        """
-        try:
-            # Collect all email addresses from meeting metadata and transcript participants
-            all_emails = set()
-            
-            # Add emails from meeting metadata
-            if meeting_metadata.get('attendees'):
-                all_emails.update(meeting_metadata.get('attendees', []))
-            
-            # Add organizer email
-            if meeting_metadata.get('organizer'):
-                all_emails.add(meeting_metadata.get('organizer'))
-                        
-            # Parse exclude list from config and remove excluded emails
-            exclude_emails = set()
-            if settings.EMAIL_EXCLUDE_LIST:
-                exclude_emails = {email.strip() for email in settings.EMAIL_EXCLUDE_LIST.split(',') if email.strip()}
-                all_emails = all_emails - exclude_emails
-                logger.info(f"Excluded {len(exclude_emails)} emails from notification: {exclude_emails}")
-            
-            # Fetch user details from auth service with fallback
-            user_mapping = []
-            try:
-                auth_client = AuthServiceClient()
-                user_details = await auth_client.fetch_users_by_emails(list(all_emails), tenant_id=tenant_id)
-                user_mapping = auth_client.create_user_email_mapping(user_details)
-                logger.info(f"Successfully fetched user details for {len(user_mapping)} users")
-            except Exception as e:
-                logger.warning(f"Auth service call failed, using fallback names - meeting_id={meeting_id}: {str(e)}")
-                user_mapping = []
-            
-            # Transform to attendees list with proper fallback
-            attendees_list = []
-            organizer_email = meeting_metadata.get('organizer', list(all_emails)[0] if all_emails else 'info@cuvera.ai')
-            organizer = None
-            
-            for email in all_emails:
-                # Find user details from auth service response
-                user_data = next((user for user in user_mapping if user['email'] == email), None)
-                
-                attendee = {
-                    "name": user_data['name'] if user_data and user_data.get('name') else "Participant",
-                    "email": email
-                }
-                attendees_list.append(attendee)
-                
-                # Set organizer if this is the organizer email
-                if email == organizer_email:
-                    organizer = attendee.copy()
-            
-            # Fallback organizer if not found
-            if not organizer and attendees_list:
-                organizer = attendees_list[0]
-            
-            # Calculate duration string
-            # Calculate duration string from HH:MM:SS format
-            duration_str = "0 Minutes"
-            if analysis.duration:
-                try:
-                    parts = analysis.duration.split(":")
-                    if len(parts) == 3:
-                        hours = int(parts[0])
-                        minutes = int(parts[1])
-                        duration_str = f"{hours} Hour {minutes} Minutes" if hours > 0 else f"{minutes} Minutes"
-                    elif len(parts) == 2:
-                        minutes = int(parts[0])
-                        duration_str = f"{minutes} Minutes"
-                except (ValueError, IndexError):
-                    pass
-            
-            # Send email notification
-            send_email_notification(
-                attendees=attendees_list,
-                organizer=organizer,
-                title=meeting_metadata.get('summary', 'Meeting Analysis Complete'),
-                startTime=meeting_metadata.get('start_time').isoformat() if meeting_metadata.get('start_time') else '',
-                endTime=meeting_metadata.get('end_time').isoformat() if meeting_metadata.get('end_time') else '',
-                duration=duration_str,
-                summary=analysis.summary,
-                redirectUrl=f"{settings.EMAIL_REDIRECT_BASE_URL}/meeting/online/{meeting_id}",
-                noOfKeyPoints=len(analysis.key_points),
-                noOfActionItems=len(analysis.action_items),
-                tenant_id=tenant_id
-            )
-            
-            logger.info(f"Email notification sent to {len(attendees_list)} attendees - meeting_id={meeting_id}")
-            
-        except Exception as e:
-            logger.error(f"Failed to send email notification - meeting_id={meeting_id}: {str(e)}")
-            # Don't fail the entire process if email fails

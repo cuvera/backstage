@@ -10,7 +10,6 @@ from fastapi.responses import JSONResponse
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from app.api.v1.router import api_router
 from app.core.config import settings
 from app.core.logging import setup_logging
 from app.db.mongodb import connect_to_mongo, close_mongo_connection
@@ -19,8 +18,6 @@ from app.messaging.producer import producer
 from app.services.jobs.daily_dept_painpoints import run_daily_department_painpoints_job
 # from scripts.test_meeting_prep import quick_test
 from app.services.meeting_analysis_orchestrator import MeetingAnalysisOrchestrator
-from app.core.openai_client import llm_client, httpx_client
-from app.messaging.producers.email_notification_producer import send_email_notification
 
 consumer_manager = RabbitMQConsumerManager()
 scheduler: AsyncIOScheduler | None = None
@@ -34,9 +31,6 @@ async def lifespan(_: FastAPI):
         await connect_to_mongo()
         await producer.connect()
         await consumer_manager.start()
-
-        app.state.llm_client = llm_client
-        app.state.httpx_client = httpx_client
 
         global scheduler
         scheduler = AsyncIOScheduler(timezone="UTC")
@@ -96,14 +90,13 @@ async def add_user_info(request: Request, call_next):
     response = await call_next(request)
     return response
 
-
-app.include_router(api_router, prefix="/api/v1")
-
-
 @app.exception_handler(HTTPException)
 async def http_exception_handler(_: Request, exc: HTTPException):
     return JSONResponse(status_code=exc.status_code, content={"message": exc.detail})
 
+@app.get("/health", summary="Service health")
+async def health():
+    return {"ok": True}
 
 import json
 @app.get("/")
