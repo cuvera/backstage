@@ -45,12 +45,12 @@ class TranscriptionV2Service:
         self.classification_processor = SegmentClassificationProcessor()
         self.cluster_builder = ClusterBuilder()
 
-    async def process_and_publish(
+    async def process(
         self,
-        v1_transcription: Dict[str, Any],
-        meeting_id: str,
+        id: str,
         tenant_id: str,
-        platform: str = "offline",
+        v1_transcription: Dict[str, Any],
+        type: Optional[str] = "",
         options: Optional[Dict] = None
     ) -> Dict[str, Any]:
         """
@@ -58,7 +58,7 @@ class TranscriptionV2Service:
 
         Args:
             v1_transcription: V1 transcription output with 'transcriptions' list
-            meeting_id: Unique meeting identifier
+            id: Unique audio identifier
             tenant_id: Tenant identifier
             platform: Platform type (default: "offline")
             options: Processing options for normalization, classification, etc.
@@ -72,8 +72,7 @@ class TranscriptionV2Service:
         options = options or {}
 
         logger.info(
-            f"[TranscriptionV2] Starting V2 processing | meeting={meeting_id} "
-            f"tenant={tenant_id} platform={platform}"
+            f"[TranscriptionV2] Starting V2 processing | audio_id={id} tenant={tenant_id} type={type}"
         )
 
         try:
@@ -126,23 +125,6 @@ class TranscriptionV2Service:
                 }
             }
 
-            # V2 is now stored in database by the orchestrator
-            # File writing removed - database is the single source of truth
-
-            # message_id = send_transcription_v2_ready(
-            #     meeting_id=meeting_id,
-            #     tenant_id=tenant_id,
-            #     platform=platform,
-            #     status="completed",
-            #     segment_classifications=segment_classifications,
-            #     processing_stats=processing_stats
-            # )
-
-            # logger.info(
-            #     f"[TranscriptionV2] V2 processing complete | meeting={meeting_id} "
-            #     f"msg={message_id}"
-            # )
-
             return {
                 "status": "completed",
                 "transcription_v2": segment_classifications,
@@ -155,29 +137,6 @@ class TranscriptionV2Service:
             logger.exception(
                 f"[TranscriptionV2] V2 processing failed | meeting={meeting_id}: {e}"
             )
-
-            # Publish failure event
-            # try:
-            #     # message_id = send_transcription_v2_ready(
-            #     #     meeting_id=meeting_id,
-            #     #     tenant_id=tenant_id,
-            #     #     platform=platform,
-            #     #     status="failed",
-            #     #     error=str(e)
-            #     # )
-
-            #     # logger.info(
-            #     #     f"[TranscriptionV2] Published failure event | meeting={meeting_id} "
-            #     #     f"msg={message_id}"
-            #     # )
-
-            # except Exception as publish_error:
-            #     logger.exception(
-            #         f"[TranscriptionV2] Failed to publish failure event: {publish_error}"
-            #     )
-
-            # raise
-
 
 # Singleton instance
 transcription_v2_service = TranscriptionV2Service()

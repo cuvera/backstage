@@ -262,11 +262,10 @@ class MeetingAnalysisOrchestrator:
                 v2_transcription_input = transcription_v1_to_v2_adapter.transform(transcription)
 
                 # Process V2 transcription (normalization + classification)
-                v2 = await transcription_v2_service.process_and_publish(
+                v2 = await transcription_v2_service.process(
                     v1_transcription=v2_transcription_input,
-                    meeting_id=meeting_id,
+                    id=meeting_id,
                     tenant_id=tenant_id,
-                    platform=original_platform
                 )
 
                 # Save transcription V2 to database
