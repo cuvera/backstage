@@ -15,25 +15,5 @@ QUEUE_CONFIG = {
       #PainPoint Agent queue
     PAINPOINTS_ROUTING_KEY: {
         "handler": "painpoint_handler"
-    },
-
-    # Meeting Processing queue
-    MEETING_PROCESSING_ROUTING_KEY: {
-        "handler": "meeting_handler"
-    },
-
-    # Meeting Retry queue
-    MEETING_RETRY_ROUTING_KEY: {
-        "handler": "meeting_retry_handler"
-    },
-    
-    # Embedding queue
-    EMBEDDING_ROUTING_KEY: {
-        "handler": "meeting_embedding_handler"
-    },
-
-    # Recorder Completion queue
-    RECORDER_COMPLETED_ROUTING_KEY: {
-        "handler": "recorder_completed_handler"
-    },
+    }
 }

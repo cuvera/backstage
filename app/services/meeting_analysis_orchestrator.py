@@ -8,7 +8,6 @@ import shutil
 from pathlib import Path
 import asyncio
 
-from app.schemas.meeting_analysis import MeetingAnalysis
 from app.services.transcription_service import TranscriptionService
 from app.utils.audio_merger import find_files_from_s3, list_files_in_s3_folder
 from app.repository import MeetingMetadataRepository

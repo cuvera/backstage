@@ -2,7 +2,6 @@ from datetime import datetime
 from typing import Dict, List, Optional
 from bson.objectid import ObjectId
 from pydantic import BaseModel, Field, ConfigDict
-from app.models.res.base import PyObjectId
 
 
 class ClusterTranscriptionSegment(BaseModel):
@@ -43,7 +42,7 @@ class TranscriptionV2Document(BaseModel):
         json_encoders={ObjectId: str}
     )
 
-    id: Optional[PyObjectId] = Field(default=None, alias="_id", description="MongoDB document ID (meeting_id)")
+    id: Optional[ObjectId] = Field(default=None, alias="_id", description="MongoDB document ID (meeting_id)")
     tenant_id: str = Field(..., description="Tenant identifier for security")
     meeting_id: str = Field(..., description="Meeting identifier")
     segments: List[ClusterSegment] = Field(default_factory=list, description="List of classified cluster segments")
