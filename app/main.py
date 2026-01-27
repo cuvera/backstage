@@ -136,11 +136,11 @@ async def root():
     # }
 
     payload = {
-        "_id": "692abe3447856a0242fca4a9",
+        "_id": "69785f20c3c136c505497eb7",
         "tenantId": "689ddc0411e4209395942bee",
         "platform": "google",
-        "bucket": "cuverademo",
-        "fileUrl": "689ddc0411e4209395942bee/google/d1160425-24f3-4889-b69f-a94a5cb17f78/Gro Genie Bot-2025-11-29.m4a"
+        "bucket": "recordings",
+        "fileUrl": "689ddc0411e4209395942bee/google/b8325ac2-80cc-4983-b5c0-92923fc74a4b/Gro Genie Bot-2026-01-27T06:56:51.671Z.m4a"
     }
 
     payload_dict = json.loads(json.dumps(payload))
