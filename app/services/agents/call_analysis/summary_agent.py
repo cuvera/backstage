@@ -11,7 +11,7 @@ Your task is to produce 'High-Fidelity' meeting summaries that provide immediate
 - **Integrity**: Never mention people or facts not present in the transcript.
 - **Scope**: Cover the entire meeting data comprehensively.
 - **Flexibility**: Autonomously decide the appropriate length of the summary based on the meeting's complexity and the amount of significant information discussed.
-- **Output**: Valid JSON."""
+- **Output**: Output must be strictly valid JSON"""
 
 SUMMARY_TASK_PROMPT = """Analyze the meeting transcript to produce a detailed, high-fidelity executive summary.
 
@@ -36,6 +36,6 @@ Output ONLY a JSON object:
 class SummaryAgent(BaseAnalysisAgent):
     async def summarize(self, transcript_block: str, metadata: str) -> str:
         prompt = SUMMARY_TASK_PROMPT.replace("{{metadata}}", metadata).replace("{{transcript_block}}", transcript_block)
-        raw = await self._call_llm(prompt, system_instruction=SUMMARY_SYSTEM_INSTRUCTION)
+        raw = await self._call_llm(prompt, system_instruction=SUMMARY_SYSTEM_INSTRUCTION, response_format={"type": "json_object"})
         payload = self._parse_json(raw)
-        return payload.get("summary", "Summary not generated")
+        return payload.get("summary", "Summary not generated") if payload else "Summary not generated"
