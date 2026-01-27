@@ -94,17 +94,19 @@ def group_segments_by_duration(segments: List[Dict], target_duration_minutes: fl
 class AudioChunker:
     """Utility for chunking audio files into segments with overlap using ffmpeg."""
 
-    def __init__(self, chunk_duration_minutes: float = 10.0, overlap_seconds: float = 5.0):
+    def __init__(self, chunk_duration_minutes: float = 10.0, overlap_seconds: float = 5.0, output_format: str = '.m4a'):
         """
         Initialize the AudioChunker.
 
         Args:
             chunk_duration_minutes: Duration of each chunk in minutes
             overlap_seconds: Overlap duration between chunks in seconds
+            output_format: Output audio format (e.g., '.m4a', '.mp3', '.mp4a')
         """
         self.chunk_duration_minutes = chunk_duration_minutes
         self.overlap_seconds = overlap_seconds
         self.chunk_duration_seconds = chunk_duration_minutes * 60
+        self.output_format = output_format
 
     def _get_audio_duration_ffprobe(self, file_path: str) -> float:
         """
@@ -198,8 +200,14 @@ class AudioChunker:
             if input_ext == output_ext:
                 cmd.extend(['-c', 'copy'])
             else:
-                # Re-encode with reasonable quality
-                cmd.extend(['-c:a', 'aac', '-b:a', '128k'])
+                # Re-encode with appropriate codec based on output format
+                if output_ext == '.mp3':
+                    cmd.extend(['-c:a', 'libmp3lame', '-b:a', '128k'])
+                elif output_ext in ['.m4a', '.mp4a']:
+                    cmd.extend(['-c:a', 'aac', '-b:a', '128k'])
+                else:
+                    # Default to AAC for unknown formats
+                    cmd.extend(['-c:a', 'aac', '-b:a', '128k'])
 
             cmd.extend(['-y', output_path])  # Overwrite if exists
 
@@ -249,7 +257,7 @@ class AudioChunker:
 
             # Determine output format based on input
             input_ext = input_path.suffix.lower()
-            output_ext = '.m4a'  # Default output format
+            output_ext = self.output_format
 
             chunks = []
             chunk_index = 0
@@ -353,7 +361,7 @@ class AudioChunker:
             logger.info(f"Created {len(grouped_segments)} chunk groups from {len(segments)} segments")
 
             # Determine output format
-            output_ext = '.m4a'
+            output_ext = self.output_format
 
             chunks = []
 
@@ -427,22 +435,24 @@ def chunk_audio_file(
     chunk_duration_minutes: float = 10.0,
     overlap_seconds: float = 5.0,
     output_dir: Optional[str] = None,
-    output_prefix: str = "chunk"
+    output_prefix: str = "chunk",
+    output_format: str = '.m4a'
 ) -> List[Dict[str, Any]]:
     """
     Convenience function to chunk an audio file.
-    
+
     Args:
         input_file_path: Path to the input audio file
         chunk_duration_minutes: Duration of each chunk in minutes
         overlap_seconds: Overlap duration between chunks in seconds
         output_dir: Directory to save chunks
         output_prefix: Prefix for output chunk files
-        
+        output_format: Output audio format (e.g., '.m4a', '.mp3', '.mp4a')
+
     Returns:
         List of chunk information dictionaries
     """
-    chunker = AudioChunker(chunk_duration_minutes, overlap_seconds)
+    chunker = AudioChunker(chunk_duration_minutes, overlap_seconds, output_format)
     return chunker.chunk_audio_file(input_file_path, output_dir, output_prefix)
 
 
@@ -452,11 +462,12 @@ def chunk_audio_by_segments(
     chunk_duration_minutes: float = 10.0,
     overlap_seconds: float = 0.0,
     output_dir: Optional[str] = None,
-    output_prefix: str = "segment_chunk"
+    output_prefix: str = "segment_chunk",
+    output_format: str = '.m4a'
 ) -> List[Dict[str, Any]]:
     """
     Convenience function to chunk an audio file based on segments.
-    
+
     Args:
         input_file_path: Path to the input audio file
         segments_data: Dictionary containing segments information
@@ -464,9 +475,113 @@ def chunk_audio_by_segments(
         overlap_seconds: Overlap duration between chunks in seconds
         output_dir: Directory to save chunks
         output_prefix: Prefix for output chunk files
-        
+        output_format: Output audio format (e.g., '.m4a', '.mp3', '.mp4a')
+
     Returns:
         List of chunk information dictionaries
     """
-    chunker = AudioChunker(chunk_duration_minutes, overlap_seconds)
+    chunker = AudioChunker(chunk_duration_minutes, overlap_seconds, output_format)
     return chunker.chunk_audio_by_segments(input_file_path, segments_data, output_dir, output_prefix)
+
+
+def create_audio_chunks(
+    audio_file_path: str,
+    speaker_timeframes: Optional[List[Dict]] = None,
+    chunk_duration_minutes: float = 10.0,
+    overlap_seconds: float = 5.0,
+    output_dir: Optional[str] = None,
+    output_prefix: str = "chunk",
+    output_format: str = '.m4a'
+) -> List[Dict[str, Any]]:
+    """
+    Create audio chunks - automatically chooses strategy based on speaker_timeframes.
+
+    Args:
+        audio_file_path: Path to the input audio file
+        speaker_timeframes: Optional list of speaker timeframes with structure:
+            [{"speakerName": str, "start": int (ms), "end": int (ms)}]
+        chunk_duration_minutes: Target duration for each chunk in minutes (default: 10.0)
+        overlap_seconds: Overlap duration between chunks in seconds (default: 5.0)
+        output_dir: Directory to save chunks (defaults to temp directory)
+        output_prefix: Prefix for output chunk files
+        output_format: Output audio format (e.g., '.m4a', '.mp3', '.mp4a')
+
+    Returns:
+        List of chunk information dictionaries
+
+    Strategy:
+        - If speaker_timeframes provided: Use segment-based chunking (speaker boundaries)
+        - Otherwise: Use simple time-based chunking
+    """
+    logger.info(f"[AudioChunker] Creating chunks for: {audio_file_path}")
+
+    if speaker_timeframes:
+        # Use segment-based chunking with speaker boundaries
+        logger.info(
+            f"[AudioChunker] Using segment-based chunking | "
+            f"{len(speaker_timeframes)} speaker timeframes | "
+            f"target_duration={chunk_duration_minutes}min"
+        )
+
+        # Convert speaker timeframes (ms) to segments (MM:SS)
+        segments_data = _convert_speaker_timeframes_to_segments(speaker_timeframes)
+
+        # Use existing segment-based chunker with no overlap
+        chunks = chunk_audio_by_segments(
+            input_file_path=audio_file_path,
+            segments_data=segments_data,
+            chunk_duration_minutes=chunk_duration_minutes,
+            overlap_seconds=0.0,  # No overlap for speaker-based chunking
+            output_dir=output_dir,
+            output_prefix=output_prefix or "segment_chunk",
+            output_format=output_format
+        )
+    else:
+        # Use simple time-based chunking
+        logger.info(
+            f"[AudioChunker] Using time-based chunking | "
+            f"duration={chunk_duration_minutes}min | "
+            f"overlap={overlap_seconds}s"
+        )
+
+        chunks = chunk_audio_file(
+            input_file_path=audio_file_path,
+            chunk_duration_minutes=chunk_duration_minutes,
+            overlap_seconds=overlap_seconds,
+            output_dir=output_dir,
+            output_prefix=output_prefix or "chunk",
+            output_format=output_format
+        )
+
+    logger.info(f"[AudioChunker] Created {len(chunks)} chunks")
+    return chunks
+
+
+def _convert_speaker_timeframes_to_segments(speaker_timeframes: List[Dict]) -> Dict:
+    """
+    Convert speaker timeframes to segments format for chunking
+
+    Args:
+        speaker_timeframes: List of dicts with speakerName, start (ms), end (ms)
+
+    Returns:
+        Dict with segments array in MM:SS format
+    """
+    segments = []
+    for idx, frame in enumerate(speaker_timeframes, start=1):
+        segments.append({
+            "segment_id": idx,
+            "start": _ms_to_mmss(frame["start"]),
+            "end": _ms_to_mmss(frame["end"])
+        })
+
+    logger.debug(f"[AudioChunker] Converted {len(segments)} speaker timeframes to segments")
+    return {"segments": segments}
+
+
+def _ms_to_mmss(ms: int) -> str:
+    """Convert milliseconds to MM:SS format"""
+    total_seconds = ms // 1000
+    minutes = total_seconds // 60
+    seconds = total_seconds % 60
+    return f"{minutes:02d}:{seconds:02d}"

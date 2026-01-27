@@ -72,7 +72,7 @@ class MeetingAnalysisOrchestrator:
             return
                         
         # Extract meeting details from payload
-        meeting_id = str(payload.get('_id'))
+        meeting_id = str(payload.get('id'))
         tenant_id = payload.get('tenantId')
         platform = payload.get('platform')
         recurring_meeting_id = payload.get('recurring_meeting_id')
@@ -136,80 +136,78 @@ class MeetingAnalysisOrchestrator:
             transcription = await transcription_v1_repo.get_transcription(meeting_id, tenant_id)
 
             if not transcription:
-                logger.info(f"Step 1.1: No existing transcription found, preparing audio file - meeting_id={meeting_id}")
-                
-                # if payload.get("fileUrl"):
-                    # file_url = payload.get("fileUrl")
-                    # temp_directory = "tmp_data"
-                # else:
-                prepare_audio_file = await self._prepare_audio_file(payload)
-                file_url = prepare_audio_file.get("local_merged_file_path")
-                temp_directory = prepare_audio_file.get("temp_directory")
-                
-                if not file_url:
-                    raise MeetingAnalysisOrchestratorError("Failed to prepare audio file")
+                logger.info(f"Step 1.1: No existing transcription found, starting new transcription - meeting_id={meeting_id}")
 
-                # Check if we need to switch from google to offline mode
-                if platform == "google":
-                    speaker_timeframes = meeting_metadata.get("speaker_timeframes", [])
-                    if not speaker_timeframes:
-                        logger.warning(
-                            f"No speaker timeframes found for Google meeting, "
-                            f"switching to offline mode - meeting_id={meeting_id}"
-                        )
-                        platform = "offline"
-                        logger.info(f"Platform switched to offline for transcription - meeting_id={meeting_id}")
+                from app.utils.audio_downloader import download_audio
+                from app.utils.audio_chunker import create_audio_chunks
+                from app.services.transcription_processor_service import TranscriptionProcessorService
+                from app.services.result_merger_service import ResultMergerService
 
-                # Step 1.2: Transcription with new TranscriptionService (with orchestrator-level retry)
-                logger.info(f"Step 1.2: Starting audio transcription with Gemini (platform={platform}) - meeting_id={meeting_id}")
-                transcription_service = TranscriptionService(max_concurrent=5)
+                # Step 1.1: Download audio
+                audio_url = payload.get("audioUrl")
+                if not audio_url:
+                    raise MeetingAnalysisOrchestratorError("No audioUrl provided in payload")
 
-                # Orchestrator-level retry (2 attempts total with 5s wait)
-                max_orchestrator_retries = 2
-                orchestrator_retry_delay = 5
-                transcription_result = None
-                last_transcription_error = None
+                download_result = await download_audio(audio_url, output_dir=settings.TEMP_AUDIO_DIR)
+                local_audio_path = download_result["local_path"]
+                logger.info(f"Step 1.1: Audio downloaded | path={local_audio_path} size={download_result['file_size_bytes']} bytes")
 
-                for orchestrator_attempt in range(max_orchestrator_retries):
-                    try:
-                        if orchestrator_attempt > 0:
-                            logger.info(f"Retrying transcription (orchestrator-level attempt {orchestrator_attempt + 1}/{max_orchestrator_retries}) after {orchestrator_retry_delay}s delay - meeting_id={meeting_id}")
-                            await asyncio.sleep(orchestrator_retry_delay)
+                # Step 1.2: Create chunks
+                speaker_timeframes = payload.get("speakerTimeframes", [])
+                chunks = create_audio_chunks(
+                    audio_file_path=local_audio_path,
+                    speaker_timeframes=speaker_timeframes,
+                    chunk_duration_minutes=10.0,
+                    overlap_seconds=5.0,
+                    output_dir=os.path.join(settings.TEMP_AUDIO_DIR, "chunks"),
+                    output_format='.mp3'
+                )
+                logger.info(f"Step 1.2: Created {len(chunks)} audio chunks")
 
-                        transcription_result = await transcription_service.transcribe_meeting(
-                            audio_file_path=file_url,
-                            meeting_metadata=meeting_metadata,
-                            meeting_id=meeting_id,
-                            tenant_id=tenant_id,
-                            platform=platform,  # 'google' or 'offline'
-                            chunk_duration_minutes=5.0 if platform == 'offline' else 10.0,
-                            overlap_seconds=5.0,
-                            output_dir=temp_directory,
-                            enable_incremental_saving=True
-                        )
+                # Step 1.3: Transcribe chunks in parallel
+                processor = TranscriptionProcessorService(max_concurrent=5)
+                participants = payload.get("participants", [])
+                chunk_results = await processor.transcribe_chunks(
+                    chunks=chunks,
+                    participants=participants,
+                    meeting_id=meeting_id,
+                    tenant_id=tenant_id,
+                    enable_incremental_saving=True
+                )
+                logger.info(f"Step 1.3: Transcribed {len(chunk_results)} chunks")
 
-                        # Success, break out of retry loop
-                        logger.info(f"Transcription successful{' (after orchestrator retry)' if orchestrator_attempt > 0 else ''} - meeting_id={meeting_id}")
-                        break
+                # Step 1.4: Merge results
+                merger = ResultMergerService()
+                merged_result = await merger.merge_transcriptions(
+                    chunk_results=chunk_results,
+                    speaker_timeframes=speaker_timeframes,
+                    participants=participants
+                )
+                logger.info(f"Step 1.4: Merged {len(merged_result.transcriptions)} segments with {len(merged_result.speakers)} speakers")
 
-                    except Exception as e:
-                        last_transcription_error = e
-                        logger.error(f"Transcription failed (orchestrator-level attempt {orchestrator_attempt + 1}/{max_orchestrator_retries}) - meeting_id={meeting_id}: {e}")
+                # Step 1.5: Save to database
+                processing_time_ms = (time.time() - step_start_time) * 1000
+                transcription_result = {
+                    "transcriptions": [seg.model_dump() for seg in merged_result.transcriptions],
+                    "speakers": [sp.model_dump() for sp in merged_result.speakers],
+                    "metadata": merged_result.metadata.model_dump(),
+                    "processing_metadata": {
+                        "platform": platform,
+                        "audio_file_path": local_audio_path,
+                        "processing_time_ms": processing_time_ms,
+                        "chunk_duration_minutes": 10.0,
+                        "overlap_seconds": 0.0 if speaker_timeframes else 5.0,
+                        "max_concurrent": 5
+                    }
+                }
 
-                        # If this was the last attempt, re-raise the error
-                        if orchestrator_attempt == max_orchestrator_retries - 1:
-                            logger.error(f"Transcription failed after {max_orchestrator_retries} orchestrator-level attempts - meeting_id={meeting_id}")
-                            raise
-
-                # Step 1.3: Save transcription v1 to database
-                logger.info(f"Step 1.3: Saving transcription v1 to database - meeting_id={meeting_id}")
                 save_result = await transcription_v1_repo.save_transcription(
                     meeting_id=meeting_id,
                     tenant_id=tenant_id,
                     transcription_result=transcription_result
                 )
                 logger.info(
-                    f"Saved transcription v1: {save_result['total_segments']} segments, "
+                    f"Step 1.5: Saved transcription v1: {save_result['total_segments']} segments, "
                     f"{save_result['total_speakers']} speakers - meeting_id={meeting_id}"
                 )
 
