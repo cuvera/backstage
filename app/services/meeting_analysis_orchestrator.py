@@ -139,7 +139,7 @@ class MeetingAnalysisOrchestrator:
                 logger.info(f"Step 1.1: No existing transcription found, starting new transcription - meeting_id={meeting_id}")
 
                 from app.utils.audio_downloader import download_audio
-                from app.utils.audio_chunker import create_audio_chunks
+                from app.utils.audio_chunker import create_audio_chunks, get_base_dir, get_chunk_output_dir
                 from app.services.transcription_processor_service import TranscriptionProcessorService
                 from app.services.result_merger_service import ResultMergerService
 
@@ -148,7 +148,7 @@ class MeetingAnalysisOrchestrator:
                 if not audio_url:
                     raise MeetingAnalysisOrchestratorError("No audioUrl provided in payload")
 
-                download_result = await download_audio(audio_url, output_dir=settings.TEMP_AUDIO_DIR)
+                download_result = await download_audio(audio_url, output_dir=get_base_dir(meeting_id))
                 local_audio_path = download_result["local_path"]
                 logger.info(f"Step 1.1: Audio downloaded | path={local_audio_path} size={download_result['file_size_bytes']} bytes")
 
@@ -159,7 +159,7 @@ class MeetingAnalysisOrchestrator:
                     speaker_timeframes=speaker_timeframes,
                     chunk_duration_minutes=10.0,
                     overlap_seconds=5.0,
-                    output_dir=os.path.join(settings.TEMP_AUDIO_DIR, "chunks"),
+                    output_dir=get_chunk_output_dir(meeting_id),
                     output_format='.mp3'
                 )
                 logger.info(f"Step 1.2: Created {len(chunks)} audio chunks")

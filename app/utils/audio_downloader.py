@@ -5,11 +5,12 @@ Downloads audio files from URLs using httpx
 
 import logging
 import os
-import tempfile
 import time
 from pathlib import Path
 from typing import Dict, Any
 import httpx
+
+from app.utils.audio_chunker import get_base_dir
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,7 @@ async def download_audio(
 
     # Create output directory
     if output_dir is None:
-        output_dir = tempfile.mkdtemp(prefix="audio_download_")
+        output_dir = get_base_dir()
     else:
         os.makedirs(output_dir, exist_ok=True)
 

@@ -1,12 +1,52 @@
 import logging
 import os
-import tempfile
 import subprocess
 import json
+import uuid
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
+from app.core.config import settings
+
 logger = logging.getLogger(__name__)
+
+
+def get_base_dir(id: Optional[str] = None) -> str:
+    """
+    Build and create the base directory for audio files.
+
+    Layout: {TEMP_AUDIO_DIR}/{id}/
+    Falls back to a random UUID when no id is provided.
+
+    Args:
+        id: Identifier to use as directory name.
+            Generates a random UUID if not provided.
+
+    Returns:
+        Absolute path to the created base directory.
+    """
+    dir_name = id if id else str(uuid.uuid4())
+    base_dir = os.path.join(settings.TEMP_AUDIO_DIR, dir_name)
+    os.makedirs(base_dir, exist_ok=True)
+    return base_dir
+
+
+def get_chunk_output_dir(id: Optional[str] = None) -> str:
+    """
+    Build and create the chunks subdirectory.
+
+    Layout: {TEMP_AUDIO_DIR}/{id}/chunks/
+
+    Args:
+        id: Identifier to use as directory name.
+            Generates a random UUID if not provided.
+
+    Returns:
+        Absolute path to the created chunk output directory.
+    """
+    chunk_dir = os.path.join(get_base_dir(id), "chunks")
+    os.makedirs(chunk_dir, exist_ok=True)
+    return chunk_dir
 
 
 class AudioChunkerError(Exception):
@@ -245,7 +285,7 @@ class AudioChunker:
 
             # Setup output directory
             if output_dir is None:
-                output_dir = tempfile.mkdtemp(prefix="audio_chunks_")
+                output_dir = get_chunk_output_dir()
             else:
                 os.makedirs(output_dir, exist_ok=True)
 
@@ -344,7 +384,7 @@ class AudioChunker:
 
             # Setup output directory
             if output_dir is None:
-                output_dir = tempfile.mkdtemp(prefix="audio_segment_chunks_")
+                output_dir = get_chunk_output_dir()
             else:
                 os.makedirs(output_dir, exist_ok=True)
 

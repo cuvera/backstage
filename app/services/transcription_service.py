@@ -3,7 +3,7 @@ import json
 import logging
 from typing import Dict, List, Any, Optional
 
-from app.utils.audio_chunker import chunk_audio_by_segments, chunk_audio_file
+from app.utils.audio_chunker import chunk_audio_by_segments, chunk_audio_file, get_chunk_output_dir
 from app.services.gemini_transcription_agent import transcribe
 from app.core.prompts import (
     TRANSCRIPTION_AND_SENTIMENT_ANALYSIS_PROMPT_ONLINE, 
@@ -668,7 +668,7 @@ class TranscriptionService:
         platform: str = "online",
         chunk_duration_minutes: float = 10.0,
         overlap_seconds: float = 0.0,
-        output_dir: str = './chunks/',
+        output_dir: Optional[str] = None,
         models: Optional[List[Dict[str, Any]]] = None,
         enable_incremental_saving: bool = True
     ) -> Dict[str, Any]:
@@ -684,7 +684,8 @@ class TranscriptionService:
             platform: "online" or "offline" - determines chunking strategy
             chunk_duration_minutes: Duration of each chunk in minutes
             overlap_seconds: Overlap between chunks in seconds
-            output_dir: Output directory for chunks
+            output_dir: Output directory for chunks. Defaults to a meeting_id-based
+                        subdirectory under settings.TEMP_AUDIO_DIR.
             models: Optional list of model configs for fallback chain
                     Example: [
                         {"model": "gemini-2.0-flash-exp", "timeout": 180, "max_tokens": 20000},
@@ -703,13 +704,14 @@ class TranscriptionService:
             participant_names = self._extract_participant_names(meeting_metadata)
 
             # 1. Chunk audio based on platform strategy
+            chunk_output_dir = output_dir or get_chunk_output_dir(meeting_id)
             chunks = await self._chunk_audio(
                 audio_file_path,
                 meeting_metadata,
                 platform,
                 chunk_duration_minutes,
                 overlap_seconds,
-                output_dir
+                chunk_output_dir
             )
 
             if not chunks:
