@@ -15,15 +15,15 @@ class SentimentLabel(str, Enum):
 
 class TranscriptionSegment(BaseModel):
     """Individual transcription segment from Gemini output."""
-    segment_id: int = Field(..., description="Segment identifier")
-    start: str = Field(..., description="Start time in MM:SS format")
-    end: str = Field(..., description="End time in MM:SS format")
-    transcription: str = Field(..., description="Transcribed text")
-    sentiment: SentimentLabel = Field(..., description="Sentiment label for this segment")
-    source_chunk: int = Field(..., description="Source chunk identifier")
-    chunk_start_time: str = Field(..., description="Chunk start time in MM:SS format")
-    chunk_end_time: str = Field(..., description="Chunk end time in MM:SS format")
-    speaker: str = Field(..., description="Speaker name")
+    segment_id: Optional[int] = Field(..., description="Segment identifier")
+    start: Optional[str] = Field(..., description="Start time in MM:SS format")
+    end: Optional[str] = Field(..., description="End time in MM:SS format")
+    transcription: Optional[str] = Field(..., description="Transcribed text")
+    sentiment: Optional[SentimentLabel] = Field(..., description="Sentiment label for this segment")
+    source_chunk: Optional[int] = Field(..., description="Source chunk identifier")
+    chunk_start_time: Optional[str] = Field(..., description="Chunk start time in MM:SS format")
+    chunk_end_time: Optional[str] = Field(..., description="Chunk end time in MM:SS format")
+    speaker: Optional[str] = Field(..., description="Speaker name")
 
 
 class SpeakerSummary(BaseModel):

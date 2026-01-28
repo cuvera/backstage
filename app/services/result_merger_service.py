@@ -72,6 +72,10 @@ class ResultMergerService:
             chunk_start_seconds = self._time_to_seconds(result.chunk_info["start_time"])
 
             for transcription in result.transcriptions:
+                # Normalize: handle cached segments where Gemini used "text" instead of "transcription"
+                if "transcription" not in transcription and "text" in transcription:
+                    transcription["transcription"] = transcription.pop("text")
+
                 # Convert relative to absolute
                 segment_start = self._time_to_seconds(transcription["start"])
                 segment_end = self._time_to_seconds(transcription["end"])
@@ -91,9 +95,17 @@ class ResultMergerService:
         # 3. Sort chronologically
         all_segments.sort(key=lambda x: (x.get("source_chunk", 0), x.get("segment_id", 0)))
 
+        # Assign segment_id if missing
+        for idx, segment in enumerate(all_segments, start=1):
+            if "segment_id" not in segment:
+                segment["segment_id"] = idx
+
         # 4. Map speakers if timeframes available
         if speaker_timeframes:
             all_segments = self._map_speakers_to_segments(all_segments, speaker_timeframes)
+        else:
+            for segment in all_segments:
+                segment["speaker"] = "Unknown"
 
         # 5. Calculate speaker summaries
         speakers_summary = self._calculate_speaker_summaries(all_segments)

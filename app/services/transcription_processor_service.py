@@ -236,6 +236,11 @@ class TranscriptionProcessorService:
                 # 4. Parse JSON response
                 result = json.loads(response_text)
 
+                # Normalize segment field names (Gemini inconsistently uses "text" vs "transcription")
+                for seg in result.get("transcriptions", []):
+                    if "transcription" not in seg and "text" in seg:
+                        seg["transcription"] = seg.pop("text")
+
             # Add chunk info to result
             result["chunk_info"] = {
                 "chunk_id": chunk_id,
