@@ -50,6 +50,31 @@ class RabbitMQProducer:
         )
         logger.info(f"Sent message to {queue_name}")
 
+    async def publish_to_exchange(self, exchange_name: str, routing_key: str, message: any):
+        """Publish message to a specific exchange with routing key."""
+        if not self.channel or self.channel.is_closed:
+            raise RuntimeError("Producer is not connected. Call connect() first.")
+
+        # Serialize message to JSON bytes if it's not already bytes
+        if isinstance(message, (dict, list)):
+            message_body = json.dumps(message, ensure_ascii=False).encode('utf-8')
+        elif isinstance(message, str):
+            message_body = message.encode('utf-8')
+        else:
+            message_body = message
+
+        # Get or declare exchange
+        exchange = await self.channel.get_exchange(exchange_name)
+
+        await exchange.publish(
+            aio_pika.Message(
+                body=message_body,
+                content_type='application/json'
+            ),
+            routing_key=routing_key
+        )
+        logger.info(f"Published message to exchange={exchange_name} routing_key={routing_key}")
+
     async def close(self):
         async with self._lock:
             if self.channel and not self.channel.is_closed:
