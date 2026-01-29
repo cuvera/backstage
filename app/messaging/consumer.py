@@ -15,7 +15,16 @@ class RabbitMQConsumerManager:
     def __init__(self):
         self._tasks = []
 
-    async def _consume_queue(self, queue_name: str, handler: Callable, dlq: str = None):
+    async def _consume_queue(
+        self,
+        queue_name: str,
+        handler: Callable,
+        dlq: str = None,
+        exchange_name: str = None,
+        exchange_type: str = "topic",
+        routing_keys: list = None,
+        durable: bool = True
+    ):
         try:
             logger.info(f"Setting up consumer for queue: {queue_name}")
 
@@ -25,9 +34,19 @@ class RabbitMQConsumerManager:
             # Set QoS for this consumer
             await channel.set_qos(prefetch_count=settings.RABBITMQ_PREFETCH_COUNT)
 
+            # Declare exchange if specified
+            exchange = None
+            if exchange_name:
+                logger.info(f"Declaring exchange: {exchange_name} (type={exchange_type})")
+                exchange = await channel.declare_exchange(
+                    exchange_name,
+                    type=aio_pika.ExchangeType(exchange_type),
+                    durable=durable
+                )
+
             # Try to declare queue, if it fails due to precondition, use passive mode
             try:
-                queue = await channel.declare_queue(queue_name, durable=True)
+                queue = await channel.declare_queue(queue_name, durable=durable)
             except Exception as e:
                 if "PRECONDITION_FAILED" in str(e):
                     logger.warning(f"Queue {queue_name} exists with different config, using passive mode")
@@ -35,6 +54,12 @@ class RabbitMQConsumerManager:
                     queue = await channel.declare_queue(queue_name, passive=True)
                 else:
                     raise
+
+            # Bind queue to exchange with routing keys if specified
+            if exchange and routing_keys:
+                for routing_key in routing_keys:
+                    logger.info(f"Binding queue {queue_name} to exchange {exchange_name} with routing key: {routing_key}")
+                    await queue.bind(exchange, routing_key=routing_key)
 
             logger.info(f"Successfully connected and consuming from queue: {queue_name}")
             async with queue.iterator() as queue_iter:
@@ -55,11 +80,15 @@ class RabbitMQConsumerManager:
         logger.info("Starting RabbitMQ consumers...")
         logger.info(f"Queue config: {QUEUE_CONFIG}")
         logger.info(f"Available handlers: {list(handler.keys())}")
-        
+
         for queue_name, config in QUEUE_CONFIG.items():
             handler_name = config["handler"]
             handler_func = handler.get(handler_name)
             dlq = config.get("dlq")
+            exchange_name = config.get("exchange")
+            exchange_type = config.get("exchange_type", "topic")
+            routing_keys = config.get("routing_keys", [])
+            durable = config.get("durable", True)
 
             logger.info(f"Setting up consumer for queue: {queue_name} with handler: {handler_name}")
 
@@ -68,13 +97,23 @@ class RabbitMQConsumerManager:
                 continue
 
             try:
-                task = asyncio.create_task(self._consume_queue(queue_name, handler_func, dlq))
+                task = asyncio.create_task(
+                    self._consume_queue(
+                        queue_name=queue_name,
+                        handler=handler_func,
+                        dlq=dlq,
+                        exchange_name=exchange_name,
+                        exchange_type=exchange_type,
+                        routing_keys=routing_keys,
+                        durable=durable
+                    )
+                )
                 self._tasks.append(task)
                 logger.info(f"Successfully created consumer task for queue: {queue_name}")
             except Exception as e:
                 logger.error(f"Failed to create consumer task for queue {queue_name}: {e}")
                 continue
-            
+
         logger.info(f"Started {len(self._tasks)} consumer tasks")
 
     async def stop(self):

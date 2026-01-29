@@ -32,6 +32,10 @@ class Settings(BaseSettings):
 
     TASK_COMMANDS_QUEUE: Optional[str] = Field(default="task-management.task-commands", env="TASK_COMMANDS_QUEUE")
 
+    # Transcription service configuration
+    TRANSCRIPTION_QUEUE: Optional[str] = Field(default="transcription.queue", env="TRANSCRIPTION_QUEUE")
+    TRANSCRIPTION_EXCHANGE: Optional[str] = Field(default="transcription.exchange", env="TRANSCRIPTION_EXCHANGE")
+
     # Temporary file storage configuration
     TEMP_AUDIO_DIR: Optional[str] = Field(default="/data", env="TEMP_AUDIO_DIR")
     TEMP_FILE_MAX_AGE_HOURS: Optional[int] = Field(default=24, env="TEMP_FILE_MAX_AGE_HOURS")

@@ -11,7 +11,7 @@ import asyncio
 from app.core.config import settings
 from app.services.transcription_v1_service import transcription_v1_service
 from app.services.transcription_v2_service import transcription_v2_service
-from app.services.utils.adapters.transcription_v1_to_v2_adapter import transcription_v1_to_v2_adapter
+from app.utils.adapters.transcription_v1_to_v2_adapter import transcription_v1_to_v2_adapter 
 from app.utils.audio_downloader import download_audio
 from app.utils.audio_chunker import get_base_dir
 
