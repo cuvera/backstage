@@ -24,7 +24,7 @@ class TranscriptionChunkResult(BaseModel):
 
 class TranscriptionChunkDocument(BaseModel):
     """MongoDB document for a single transcription chunk."""
-    meeting_id: str = Field(..., description="Meeting identifier")
+    transcription_id: str = Field(..., description="Transcription identifier")
     tenant_id: str = Field(..., description="Tenant identifier")
     chunk_id: int = Field(..., description="Chunk sequence number (1-based)")
     status: str = Field(..., description="Chunk status: processing, success, or failed")

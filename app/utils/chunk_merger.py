@@ -1,5 +1,5 @@
 """
-Result Merger Service
+Chunk Merger Utility
 Merges chunk transcription results into single transcript with speaker mapping
 """
 
@@ -20,9 +20,9 @@ class MergedTranscriptionResult:
     metadata: TranscriptionMetadata
 
 
-class ResultMergerService:
+class ChunkMerger:
     """
-    Service for merging chunk transcription results
+    Utility for merging chunk transcription results
 
     Features:
     - Validates all chunks succeeded (fails if any chunk failed)
@@ -53,7 +53,7 @@ class ResultMergerService:
         Raises:
             ValueError: If any chunks failed
         """
-        logger.info(f"[ResultMerger] Merging {len(chunk_results)} chunk results")
+        logger.info(f"[ChunkMerger] Merging {len(chunk_results)} chunk results")
 
         # 1. Validate all chunks succeeded
         failed_chunks = [r for r in chunk_results if r.status != "success"]
@@ -63,7 +63,7 @@ class ResultMergerService:
                 f"Transcription incomplete: {len(failed_chunks)}/{len(chunk_results)} chunks failed "
                 f"(chunk IDs: {failed_ids}). Cannot merge partial results."
             )
-            logger.error(f"[ResultMerger] {error_msg}")
+            logger.error(f"[ChunkMerger] {error_msg}")
             raise ValueError(error_msg)
 
         # 2. Merge segments with absolute timestamps
@@ -120,7 +120,7 @@ class ResultMergerService:
         )
 
         logger.info(
-            f"[ResultMerger] Merge complete | "
+            f"[ChunkMerger] Merge complete | "
             f"segments={len(all_segments)} speakers={len(speakers_summary)}"
         )
 

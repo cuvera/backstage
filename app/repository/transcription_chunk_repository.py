@@ -49,24 +49,24 @@ class TranscriptionChunkRepository(BaseRepository):
         """Create MongoDB indexes for optimal query performance."""
         collection = await self._ensure_collection()
 
-        # Compound index for querying chunks by meeting
+        # Compound index for querying chunks by transcription
         await collection.create_index(
-            [("meeting_id", ASCENDING), ("tenant_id", ASCENDING), ("chunk_id", ASCENDING)],
-            name="meeting_tenant_chunk",
+            [("transcription_id", ASCENDING), ("tenant_id", ASCENDING), ("chunk_id", ASCENDING)],
+            name="transcription_tenant_chunk",
             unique=True
         )
 
         # Index for querying by status
         await collection.create_index(
-            [("meeting_id", ASCENDING), ("status", ASCENDING)],
-            name="meeting_status"
+            [("transcription_id", ASCENDING), ("status", ASCENDING)],
+            name="transcription_status"
         )
 
         logger.info("Created indexes for transcription_chunks collection")
 
     async def save_chunk(
         self,
-        meeting_id: str,
+        transcription_id: str,
         tenant_id: str,
         chunk_id: int,
         status: str,
@@ -78,7 +78,7 @@ class TranscriptionChunkRepository(BaseRepository):
         Save or update a transcription chunk.
 
         Args:
-            meeting_id: Meeting identifier
+            transcription_id: Transcription identifier
             tenant_id: Tenant identifier
             chunk_id: Chunk sequence number (1-based)
             status: Chunk status ("processing", "success", "failed")
@@ -118,7 +118,7 @@ class TranscriptionChunkRepository(BaseRepository):
 
             # Create document
             chunk_doc = TranscriptionChunkDocument(
-                meeting_id=meeting_id,
+                transcription_id=transcription_id,
                 tenant_id=tenant_id,
                 chunk_id=chunk_id,
                 status=status,
@@ -131,7 +131,7 @@ class TranscriptionChunkRepository(BaseRepository):
 
             # Upsert document
             filter_query = {
-                "meeting_id": meeting_id,
+                "transcription_id": transcription_id,
                 "tenant_id": tenant_id,
                 "chunk_id": chunk_id
             }
@@ -146,11 +146,11 @@ class TranscriptionChunkRepository(BaseRepository):
             )
 
             logger.info(
-                f"Saved chunk {chunk_id} for meeting={meeting_id}, status={status}"
+                f"Saved chunk {chunk_id} for transcription={transcription_id}, status={status}"
             )
 
             return {
-                "meeting_id": meeting_id,
+                "transcription_id": transcription_id,
                 "tenant_id": tenant_id,
                 "chunk_id": chunk_id,
                 "status": status,
@@ -159,20 +159,20 @@ class TranscriptionChunkRepository(BaseRepository):
             }
 
         except Exception as exc:
-            logger.exception(f"Failed to save chunk {chunk_id} for meeting={meeting_id}: {exc}")
+            logger.exception(f"Failed to save chunk {chunk_id} for transcription={transcription_id}: {exc}")
             raise TranscriptionChunkRepositoryError(f"Failed to save chunk: {exc}") from exc
 
     async def get_chunks(
         self,
-        meeting_id: str,
+        transcription_id: str,
         tenant_id: str,
         status: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
-        Get all chunks for a meeting, optionally filtered by status.
+        Get all chunks for a transcription, optionally filtered by status.
 
         Args:
-            meeting_id: Meeting identifier
+            transcription_id: Transcription identifier
             tenant_id: Tenant identifier
             status: Optional status filter ("success", "failed", "processing")
 
@@ -183,7 +183,7 @@ class TranscriptionChunkRepository(BaseRepository):
             collection = await self._ensure_collection()
 
             filter_query = {
-                "meeting_id": meeting_id,
+                "transcription_id": transcription_id,
                 "tenant_id": tenant_id
             }
 
@@ -194,52 +194,52 @@ class TranscriptionChunkRepository(BaseRepository):
             chunks = await cursor.to_list(length=None)
 
             logger.info(
-                f"Retrieved {len(chunks)} chunks for meeting={meeting_id}"
+                f"Retrieved {len(chunks)} chunks for transcription={transcription_id}"
                 + (f", status={status}" if status else "")
             )
 
             return chunks
 
         except Exception as exc:
-            logger.exception(f"Failed to get chunks for meeting={meeting_id}: {exc}")
+            logger.exception(f"Failed to get chunks for transcription={transcription_id}: {exc}")
             raise TranscriptionChunkRepositoryError(f"Failed to get chunks: {exc}") from exc
 
     async def get_completed_chunk_ids(
         self,
-        meeting_id: str,
+        transcription_id: str,
         tenant_id: str
     ) -> List[int]:
         """
-        Get list of successfully completed chunk IDs for a meeting.
+        Get list of successfully completed chunk IDs for a transcription.
 
         Args:
-            meeting_id: Meeting identifier
+            transcription_id: Transcription identifier
             tenant_id: Tenant identifier
 
         Returns:
             List of chunk IDs with status="success"
         """
         try:
-            chunks = await self.get_chunks(meeting_id, tenant_id, status="success")
+            chunks = await self.get_chunks(transcription_id, tenant_id, status="success")
             chunk_ids = [chunk["chunk_id"] for chunk in chunks]
 
-            logger.info(f"Found {len(chunk_ids)} completed chunks for meeting={meeting_id}")
+            logger.info(f"Found {len(chunk_ids)} completed chunks for transcription={transcription_id}")
             return chunk_ids
 
         except Exception as exc:
-            logger.exception(f"Failed to get completed chunk IDs for meeting={meeting_id}: {exc}")
+            logger.exception(f"Failed to get completed chunk IDs for transcription={transcription_id}: {exc}")
             raise TranscriptionChunkRepositoryError(f"Failed to get completed chunk IDs: {exc}") from exc
 
     async def delete_chunks(
         self,
-        meeting_id: str,
+        transcription_id: str,
         tenant_id: str
     ) -> Dict[str, Any]:
         """
-        Delete all chunks for a meeting.
+        Delete all chunks for a transcription.
 
         Args:
-            meeting_id: Meeting identifier
+            transcription_id: Transcription identifier
             tenant_id: Tenant identifier
 
         Returns:
@@ -249,36 +249,36 @@ class TranscriptionChunkRepository(BaseRepository):
             collection = await self._ensure_collection()
 
             filter_query = {
-                "meeting_id": meeting_id,
+                "transcription_id": transcription_id,
                 "tenant_id": tenant_id
             }
 
             result = await collection.delete_many(filter_query)
 
             logger.info(
-                f"Deleted {result.deleted_count} chunks for meeting={meeting_id}, tenant={tenant_id}"
+                f"Deleted {result.deleted_count} chunks for transcription={transcription_id}, tenant={tenant_id}"
             )
 
             return {
-                "meeting_id": meeting_id,
+                "transcription_id": transcription_id,
                 "tenant_id": tenant_id,
                 "deleted_count": result.deleted_count
             }
 
         except Exception as exc:
-            logger.exception(f"Failed to delete chunks for meeting={meeting_id}: {exc}")
+            logger.exception(f"Failed to delete chunks for transcription={transcription_id}: {exc}")
             raise TranscriptionChunkRepositoryError(f"Failed to delete chunks: {exc}") from exc
 
     async def get_chunk_stats(
         self,
-        meeting_id: str,
+        transcription_id: str,
         tenant_id: str
     ) -> Dict[str, Any]:
         """
-        Get statistics about chunks for a meeting.
+        Get statistics about chunks for a transcription.
 
         Args:
-            meeting_id: Meeting identifier
+            transcription_id: Transcription identifier
             tenant_id: Tenant identifier
 
         Returns:
@@ -290,7 +290,7 @@ class TranscriptionChunkRepository(BaseRepository):
             pipeline = [
                 {
                     "$match": {
-                        "meeting_id": meeting_id,
+                        "transcription_id": transcription_id,
                         "tenant_id": tenant_id
                     }
                 },
@@ -319,9 +319,9 @@ class TranscriptionChunkRepository(BaseRepository):
                 if status in stats:
                     stats[status] = count
 
-            logger.info(f"Chunk stats for meeting={meeting_id}: {stats}")
+            logger.info(f"Chunk stats for transcription={transcription_id}: {stats}")
             return stats
 
         except Exception as exc:
-            logger.exception(f"Failed to get chunk stats for meeting={meeting_id}: {exc}")
+            logger.exception(f"Failed to get chunk stats for transcription={transcription_id}: {exc}")
             raise TranscriptionChunkRepositoryError(f"Failed to get chunk stats: {exc}") from exc

@@ -22,7 +22,7 @@ from typing import Any, Dict, Optional
 from app.services.processors.normalization_processor import NormalizationProcessor
 from app.services.processors.classification_processor import SegmentClassificationProcessor
 from app.services.processors.cluster_builder import ClusterBuilder
-from app.messaging.producers.transcription_v2_producer import send_transcription_v2_ready
+from app.messaging.producers.transcription_producer import publish_v2
 
 logger = logging.getLogger(__name__)
 
@@ -47,9 +47,11 @@ class TranscriptionV2Service:
 
     async def process(
         self,
+        v1_transcription: Dict[str, Any],
         id: str,
         tenant_id: str,
-        v1_transcription: Dict[str, Any],
+        platform: str,
+        mode: str,
         type: Optional[str] = "",
         options: Optional[Dict] = None
     ) -> Dict[str, Any]:
@@ -58,13 +60,15 @@ class TranscriptionV2Service:
 
         Args:
             v1_transcription: V1 transcription output with 'transcriptions' list
-            id: Unique audio identifier
+            id: Unique transcription identifier
             tenant_id: Tenant identifier
-            platform: Platform type (default: "offline")
+            platform: Platform identifier (google, zoom, etc)
+            mode: Mode type ("online" or "offline")
+            type: Optional type field
             options: Processing options for normalization, classification, etc.
 
         Returns:
-            Processing result summary with message_id and stats
+            Processing result summary with processing stats
 
         Raises:
             Exception: If processing or publishing fails
@@ -115,7 +119,17 @@ class TranscriptionV2Service:
             )
 
             # Step 4: Publish to RabbitMQ
-            logger.info(f"[TranscriptionV2] Step 4: Publishing to RabbitMQ")
+            logger.info(f"[TranscriptionV2] Step 4: Publishing V2 to RabbitMQ")
+
+            await publish_v2(
+                meeting_id=id,
+                tenant_id=tenant_id,
+                platform=platform,
+                mode=mode,
+                transcription_v2=segment_classifications
+            )
+
+            logger.info(f"[TranscriptionV2] Published V2 to RabbitMQ - transcription_id={id}")
 
             processing_stats = {
                 "normalization": normalization_stats,
@@ -125,18 +139,20 @@ class TranscriptionV2Service:
                 }
             }
 
+            logger.info(f"[TranscriptionV2] V2 pipeline completed - transcription_id={id}")
+
             return {
                 "status": "completed",
                 "transcription_v2": segment_classifications,
                 "segments": segment_classifications,
-                # "message_id": message_id,
                 "processing_stats": processing_stats
             }
 
         except Exception as e:
             logger.exception(
-                f"[TranscriptionV2] V2 processing failed | meeting={meeting_id}: {e}"
+                f"[TranscriptionV2] V2 processing failed | transcription_id={id}: {e}"
             )
+            raise
 
 # Singleton instance
 transcription_v2_service = TranscriptionV2Service()

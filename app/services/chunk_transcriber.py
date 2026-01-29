@@ -1,5 +1,5 @@
 """
-Transcription Processor Service
+Chunk Transcriber
 Handles parallel transcription of audio chunks with incremental saving
 """
 
@@ -13,8 +13,8 @@ from dataclasses import dataclass
 from app.core.llm_client import llm_client
 from app.repository.transcription_chunk_repository import TranscriptionChunkRepository
 from app.core.prompts import (
-    TRANSCRIPTION_AND_SENTIMENT_ANALYSIS_PROMPT_ONLINE,
-    TRANSCRIPTION_AND_SENTIMENT_ANALYSIS_PROMPT_OFFLINE
+    ONLINE_TRANSCRIPTION,
+    OFFLINE_TRANSCRIPTION
 )
 
 logger = logging.getLogger(__name__)
@@ -30,7 +30,7 @@ class ChunkTranscriptionResult:
     error: Optional[str] = None
 
 
-class TranscriptionProcessorService:
+class ChunkTranscriber:
     """
     Service for parallel transcription of audio chunks with incremental saving
 
@@ -43,20 +43,20 @@ class TranscriptionProcessorService:
 
     def __init__(self, max_concurrent: int = 5):
         """
-        Initialize TranscriptionProcessorService
+        Initialize ChunkTranscriber
 
         Args:
             max_concurrent: Maximum number of concurrent transcription calls
         """
         self.semaphore = asyncio.Semaphore(max_concurrent)
         self.max_concurrent = max_concurrent
-        logger.info(f"[TranscriptionProcessor] Initialized with max {max_concurrent} concurrent")
+        logger.info(f"[ChunkTranscriber] Initialized with max {max_concurrent} concurrent")
 
     async def transcribe_chunks(
         self,
         chunks: List[Dict],
         participants: List[Dict],
-        meeting_id: str,
+        transcription_id: str,
         tenant_id: str,
         enable_incremental_saving: bool = True
     ) -> List[ChunkTranscriptionResult]:
@@ -67,7 +67,7 @@ class TranscriptionProcessorService:
             chunks: List of audio chunks from chunker
             participants: List of participant objects with structure:
                 [{"id": str, "name": str, "email": str, "department": str}]
-            meeting_id: Meeting identifier
+            transcription_id: Transcription identifier
             tenant_id: Tenant identifier
             enable_incremental_saving: Enable saving chunks incrementally (default: True)
 
@@ -75,7 +75,7 @@ class TranscriptionProcessorService:
             List of ChunkTranscriptionResult objects
         """
         logger.info(
-            f"[TranscriptionProcessor] Starting transcription | "
+            f"[ChunkTranscriber] Starting transcription | "
             f"chunks={len(chunks)} participants={len(participants)}"
         )
 
@@ -89,14 +89,14 @@ class TranscriptionProcessorService:
         chunks_to_process = chunks
 
         if enable_incremental_saving and chunk_repo:
-            existing_chunks = await chunk_repo.get_chunks(meeting_id, tenant_id, status="success")
+            existing_chunks = await chunk_repo.get_chunks(transcription_id, tenant_id, status="success")
 
             if existing_chunks:
                 completed_ids = {c["chunk_id"] for c in existing_chunks}
                 chunks_to_process = [c for c in chunks if c.get("chunk_id") not in completed_ids]
 
                 logger.info(
-                    f"[TranscriptionProcessor] Found {len(existing_chunks)} completed chunks, "
+                    f"[ChunkTranscriber] Found {len(existing_chunks)} completed chunks, "
                     f"processing {len(chunks_to_process)} remaining"
                 )
 
@@ -116,20 +116,20 @@ class TranscriptionProcessorService:
             new_results = await self._transcribe_chunks_parallel(
                 chunks_to_process,
                 participants,
-                meeting_id,
+                transcription_id,
                 tenant_id,
                 chunk_repo
             )
             results.extend(new_results)
 
-        logger.info(f"[TranscriptionProcessor] Completed transcription of {len(results)} chunks")
+        logger.info(f"[ChunkTranscriber] Completed transcription of {len(results)} chunks")
         return results
 
     async def _transcribe_chunks_parallel(
         self,
         chunks: List[Dict],
         participants: List[Dict],
-        meeting_id: str,
+        transcription_id: str,
         tenant_id: str,
         chunk_repo: Optional[TranscriptionChunkRepository]
     ) -> List[ChunkTranscriptionResult]:
@@ -139,7 +139,7 @@ class TranscriptionProcessorService:
         Args:
             chunks: List of chunks to process
             participants: List of participant objects
-            meeting_id: Meeting identifier
+            transcription_id: Transcription identifier
             tenant_id: Tenant identifier
             chunk_repo: Repository for saving chunks (None to disable saving)
 
@@ -163,7 +163,7 @@ class TranscriptionProcessorService:
                 self._transcribe_chunk(
                     chunk=chunk,
                     prompt=prompt,
-                    meeting_id=meeting_id,
+                    transcription_id=transcription_id,
                     tenant_id=tenant_id,
                     chunk_repo=chunk_repo
                 )
@@ -178,7 +178,7 @@ class TranscriptionProcessorService:
         self,
         chunk: Dict,
         prompt: str,
-        meeting_id: str,
+        transcription_id: str,
         tenant_id: str,
         chunk_repo: Optional[TranscriptionChunkRepository]
     ) -> ChunkTranscriptionResult:
@@ -192,14 +192,14 @@ class TranscriptionProcessorService:
         if chunk_repo:
             try:
                 await chunk_repo.save_chunk(
-                    meeting_id=meeting_id,
+                    transcription_id=transcription_id,
                     tenant_id=tenant_id,
                     chunk_id=chunk_id,
                     status="processing",
                     chunk_info=chunk
                 )
             except Exception as e:
-                logger.warning(f"[TranscriptionProcessor] Failed to mark chunk {chunk_id} as processing: {e}")
+                logger.warning(f"[ChunkTranscriber] Failed to mark chunk {chunk_id} as processing: {e}")
 
         try:
             # Transcribe with semaphore (retry + fallback handled by llm_client)
@@ -255,7 +255,7 @@ class TranscriptionProcessorService:
 
             if segments_sent > 0 and segments_sent != segments_returned:
                 logger.warning(
-                    f"[TranscriptionProcessor] Chunk {chunk_id} mismatch: "
+                    f"[ChunkTranscriber] Chunk {chunk_id} mismatch: "
                     f"sent {segments_sent} segments but received {segments_returned} transcriptions"
                 )
 
@@ -263,7 +263,7 @@ class TranscriptionProcessorService:
             if chunk_repo:
                 try:
                     await chunk_repo.save_chunk(
-                        meeting_id=meeting_id,
+                        transcription_id=transcription_id,
                         tenant_id=tenant_id,
                         chunk_id=chunk_id,
                         status="success",
@@ -271,9 +271,9 @@ class TranscriptionProcessorService:
                         result=result
                     )
                 except Exception as save_error:
-                    logger.error(f"[TranscriptionProcessor] Failed to save chunk {chunk_id}: {save_error}")
+                    logger.error(f"[ChunkTranscriber] Failed to save chunk {chunk_id}: {save_error}")
 
-            logger.info(f"[TranscriptionProcessor] ✅ Chunk {chunk_id} succeeded")
+            logger.info(f"[ChunkTranscriber] ✅ Chunk {chunk_id} succeeded")
 
             return ChunkTranscriptionResult(
                 chunk_id=chunk_id,
@@ -283,13 +283,13 @@ class TranscriptionProcessorService:
             )
 
         except Exception as e:
-            logger.error(f"[TranscriptionProcessor] ❌ Chunk {chunk_id} failed: {e}")
+            logger.error(f"[ChunkTranscriber] ❌ Chunk {chunk_id} failed: {e}")
 
             # Save as failed
             if chunk_repo:
                 try:
                     await chunk_repo.save_chunk(
-                        meeting_id=meeting_id,
+                        transcription_id=transcription_id,
                         tenant_id=tenant_id,
                         chunk_id=chunk_id,
                         status="failed",
@@ -297,7 +297,7 @@ class TranscriptionProcessorService:
                         error=str(e)
                     )
                 except Exception as save_error:
-                    logger.error(f"[TranscriptionProcessor] Failed to save failed chunk {chunk_id}: {save_error}")
+                    logger.error(f"[ChunkTranscriber] Failed to save failed chunk {chunk_id}: {save_error}")
 
             return ChunkTranscriptionResult(
                 chunk_id=chunk_id,
@@ -321,9 +321,9 @@ class TranscriptionProcessorService:
         """
         # Select base prompt
         if mode == "offline":
-            base_prompt = TRANSCRIPTION_AND_SENTIMENT_ANALYSIS_PROMPT_OFFLINE
+            base_prompt = OFFLINE_TRANSCRIPTION
         else:
-            base_prompt = TRANSCRIPTION_AND_SENTIMENT_ANALYSIS_PROMPT_ONLINE
+            base_prompt = ONLINE_TRANSCRIPTION
 
         # Replace placeholders
         prompt = base_prompt
