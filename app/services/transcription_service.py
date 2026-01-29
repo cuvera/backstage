@@ -4,7 +4,6 @@ import logging
 from typing import Dict, List, Any, Optional
 
 from app.utils.audio_chunker import chunk_audio_by_segments, chunk_audio_file, get_chunk_output_dir
-from app.services.gemini_transcription_agent import transcribe
 from app.core.prompts import (
     TRANSCRIPTION_AND_SENTIMENT_ANALYSIS_PROMPT_ONLINE, 
     TRANSCRIPTION_AND_SENTIMENT_ANALYSIS_PROMPT_OFFLINE

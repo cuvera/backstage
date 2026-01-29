@@ -9,8 +9,6 @@ from pathlib import Path
 import asyncio
 
 from app.services.transcription_service import TranscriptionService
-from app.utils.audio_merger import find_files_from_s3, list_files_in_s3_folder
-from app.utils.s3_client import download_s3_file
 from app.core.config import settings
 from app.services.transcription_v2_service import transcription_v2_service
 from app.services.adapters.transcription_v1_to_v2_adapter import transcription_v1_to_v2_adapter

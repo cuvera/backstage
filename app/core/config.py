@@ -4,104 +4,39 @@ from typing import Optional
 import logging
 
 class Settings(BaseSettings):
-    SERVICE_NAME: str = Field(default="backstage", env="SERVICE_NAME")
-    PROJECT_NAME: str = Field(default="backstage", env="PROJECT_NAME")
-    VERSION: str = Field(default="1.0.0", env="VERSION")
-    DEBUG: bool = Field(default=False, env="DEBUG")
+    SERVICE_NAME: Optional[str] = Field(default="backstage", env="SERVICE_NAME")
     
-    MONGODB_URL: str = Field(default="mongodb://localhost:27017", env="MONGODB_URL")
-    DATABASE_NAME: str = Field(default="intelligence_db", env="DATABASE_NAME")
+    MONGODB_URL: Optional[str] = Field(default="mongodb://localhost:27017", env="MONGODB_URL")
+    DATABASE_NAME: Optional[str] = Field(default="cognitive", env="DATABASE_NAME")
     
-    AUTH_SERVICE_URL: Optional[str] = Field(default=None, env="AUTH_SERVICE_URL")
+    LLM_FALLBACK_CHAIN: Optional[str] = Field(default="gemini-2.5-pro,gemini-3.0-flash-preview,gpt-4.1", env="LLM_FALLBACK_CHAIN")
+    LLM_TIMEOUT: Optional[float] = Field(default=600, env="LLM_TIMEOUT")
+    LLM_MAX_RETRIES: Optional[int] = Field(default=3, env="LLM_MAX_RETRIES")
 
-    
-    DEFAULT_LLM_PROVIDER: str = Field(default="gemini", env="DEFAULT_LLM_PROVIDER")
-    DEFAULT_LLM_MODEL: str = Field(default="gemini-2.5-flash", env="DEFAULT_LLM_MODEL")
-    # Supports: model names (gemini-2.5-flash), provider names (gemini), or mixed
-    LLM_FALLBACK_CHAIN: str = Field(default="gemini-2.5-pro,gemini-3.0-flash-preview,gpt-4.1", env="LLM_FALLBACK_CHAIN")
-    LLM_TIMEOUT: float = Field(default=600, env="LLM_TIMEOUT")
-    LLM_MAX_RETRIES: int = Field(default=3, env="LLM_MAX_RETRIES")
-    
     OPENAI_API_KEY: Optional[str] = Field(default=None, env="OPENAI_API_KEY")
-    WHISPER_MODEL_SIZE: str = Field(default="tiny", env="WHISPER_MODEL_SIZE")
-    WHISPER_DEVICE: str = Field(default="cpu", env="WHISPER_DEVICE")
-    WHISPER_COMPUTE_TYPE: str = Field(default="int8", env="WHISPER_COMPUTE_TYPE")
     
     AZURE_OPENAI_API_KEY: Optional[str] = Field(default=None, env="AZURE_OPENAI_API_KEY")
     AZURE_OPENAI_ENDPOINT: Optional[str] = Field(default=None, env="AZURE_OPENAI_ENDPOINT")
-    AZURE_OPENAI_API_VERSION: str = Field(default="2024-02-15-preview", env="AZURE_OPENAI_API_VERSION")
+    AZURE_OPENAI_API_VERSION: Optional[str] = Field(default="2024-02-15-preview", env="AZURE_OPENAI_API_VERSION")
     AZURE_OPENAI_DEPLOYMENT_NAME: Optional[str] = Field(default=None, env="AZURE_OPENAI_DEPLOYMENT_NAME")
     
-    GEMINI_API_KEY: Optional[str] = Field(default=None, env="GEMINI_API_KEY")
+    GEMINI_API_KEY: Optional[str] = Field(default=None, env="GEMINI_API_KEY") 
     
-    TRANSCRIPTION_PROVIDER: str = Field(default="gemini", env="TRANSCRIPTION_PROVIDER")
+    LOG_LEVEL: Optional[str] = Field(default="INFO", env="LOG_LEVEL")
+    
+    RABBITMQ_URL: Optional[str] = Field(env="RABBITMQ_URL")
+    RABBITMQ_HEARTBEAT: Optional[int] = Field(default=1800, env="RABBITMQ_HEARTBEAT")
+    RABBITMQ_CONNECTION_TIMEOUT: Optional[int] = Field(default=30000, env="RABBITMQ_CONNECTION_TIMEOUT")
+    RABBITMQ_PREFETCH_COUNT: Optional[int] = Field(default=2, env="RABBITMQ_PREFETCH_COUNT")
+    MAX_CONCURRENT_MEETINGS: Optional[int] = Field(default=2, env="MAX_CONCURRENT_MEETINGS")
 
-    HUGGINGFACE_TOKEN: str = Field(default="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", env="HUGGINGFACE_TOKEN")
-    # For faster-whisper (e.g., "tiny", "base", "small", "medium", "large-v3")
-    WHISPER_MODEL_NAME: str = Field(default="base", env="WHISPER_MODEL_NAME")
-    
-    HOST: str = Field(default="0.0.0.0", env="HOST")
-    PORT: int = Field(default=8000, env="PORT")
-    
-    SECRET_KEY: str = Field(default="your-secret-key-change-in-production", env="SECRET_KEY")
-    
-    LOG_LEVEL: str = Field(default="INFO", env="LOG_LEVEL")
-    
-    AWS_ACCESS_KEY_ID: Optional[str] = Field(default=None, env="AWS_ACCESS_KEY_ID")
-    AWS_SECRET_ACCESS_KEY: Optional[str] = Field(default=None, env="AWS_SECRET_ACCESS_KEY")
-    AWS_REGION: str = Field(default="us-east-1", env="AWS_REGION")
-    S3_BUCKET_NAME: str = Field(default="recordings", env="S3_BUCKET_NAME")
-    AWS_ENDPOINT: Optional[str] = Field(default=None, env="AWS_ENDPOINT")
-    
-    RABBITMQ_URL: str = Field(env="RABBITMQ_URL")
-    RABBITMQ_HEARTBEAT: int = Field(default=1800, env="RABBITMQ_HEARTBEAT")
-    RABBITMQ_CONNECTION_TIMEOUT: int = Field(default=30000, env="RABBITMQ_CONNECTION_TIMEOUT")
-    RABBITMQ_PREFETCH_COUNT: int = Field(default=2, env="RABBITMQ_PREFETCH_COUNT")
-    MAX_CONCURRENT_MEETINGS: int = Field(default=2, env="MAX_CONCURRENT_MEETINGS")
-    
-    RABBITMQ_VOICEPRINT_REGISTERED_QUEUE: str = Field(env="RABBITMQ_VOICEPRINT_REGISTERED_QUEUE")
-    RABBITMQ_MEETING_INSIGHTS_GENERATION_QUEUE: str = Field(env="RABBITMQ_MEETING_INSIGHTS_GENERATION_QUEUE")
-    RABBITMQ_MEETING_INSIGHTS_GENERATED_QUEUE: str = Field(env= "RABBITMQ_MEETING_INSIGHTS_GENERATED_QUEUE")
-    RABBITMQ_EMBEDDING_QUEUE: str = Field(default="meeting.embedding.ready", env="RABBITMQ_EMBEDDING_QUEUE")
-
-    ENABLE_TRANSCRIPTION_CONSUMER: bool = Field(default=True, env="ENABLE_TRANSCRIPTION_CONSUMER")
-
-    # QDRANT Configuration for VoxScribe
-    QDRANT_URL: Optional[str] = Field(default=None, env="QDRANT_URL")
-    QDRANT_COLLECTION_NAME: Optional[str] = Field(default=None, env="QDRANT_COLLECTION_NAME")
-    QDRANT_API_KEY: Optional[str] = Field(default=None, env="QDRANT_API_KEY")
-
-    # QDRANT Meeting Configuration
-    QDRANT_MEETING_URL: Optional[str] = Field(default=None, env="QDRANT_MEETING_URL")
-    QDRANT_MEETING_API_KEY: Optional[str] = Field(default=None, env="QDRANT_MEETING_API_KEY")
-    QDRANT_MEETING_PORT: int = Field(default=6333, env="QDRANT_MEETING_PORT")
-    QDRANT_MEETING_COLLECTION_NAME: str = Field(default="meeting-transcripts-v1", env="QDRANT_MEETING_COLLECTION_NAME")
-
-    CUVERA_CORE_SERVICE: str =Field(env="CUVERA_CORE_SERVICE")
-    
-    AUTH_SERVICE_URL: str = Field(default="http://localhost:7005", env="AUTH_SERVICE_URL")
-
-    RABBITMQ_PAINPOINT_CAPTURED_QUEUE: str = Field(env="painpoint.captured.q",)
-    RABBITMQ_MEETING_PROCESSING_QUEUE: str = Field(default="dev.meetings.completed.v1", env="RABBITMQ_MEETING_PROCESSING_QUEUE")
-    RABBITMQ_OFFLINE_MEETING_PROCESSING_QUEUE: str = Field(default="dev.meetings.completed.v1", env="RABBITMQ_OFFLINE_MEETING_PROCESSING_QUEUE")
-    RABBITMQ_BACKSTAGE_RETRY_QUEUE: str = Field(default="meetings.analysis.retry", env="RABBITMQ_BACKSTAGE_RETRY_QUEUE")
-    RABBITMQ_RECORDER_COMPLETED_QUEUE: str = Field(default="meetings.recorder.completed.v1", env="RABBITMQ_RECORDER_COMPLETED_QUEUE")
-    EMAIL_NOTIFICATIONS_ROUTING_KEY: str = Field(default="dev.integration.email.notifications.v1", env="EMAIL_NOTIFICATIONS_ROUTING_KEY")
-    TASK_COMMANDS_QUEUE: str = Field(default="task-management.task-commands", env="TASK_COMMANDS_QUEUE")
-    MEETING_BUCKET_NAME: str = Field(default="recordings", env="MEETING_BUCKET_NAME")
-
-    # Scheduler configuration
-    PAINPOINT_CRON_EXPRESSION: str = Field(default="* * * * *", env="PAINPOINT_CRON_EXPRESSION")
-    
-    # Email notification settings
-    EMAIL_REDIRECT_BASE_URL: str = Field(default="https://bull.grogenie.ai", env="EMAIL_REDIRECT_BASE_URL")
-    EMAIL_EXCLUDE_LIST: str = Field(default="cuvera-bot@bullmachine.com,cuverabot@gmail.com", env="EMAIL_EXCLUDE_LIST")
+    TASK_COMMANDS_QUEUE: Optional[str] = Field(default="task-management.task-commands", env="TASK_COMMANDS_QUEUE")
 
     # Temporary file storage configuration
-    TEMP_AUDIO_DIR: str = Field(default="/data", env="TEMP_AUDIO_DIR")
-    TEMP_FILE_MAX_AGE_HOURS: int = Field(default=24, env="TEMP_FILE_MAX_AGE_HOURS")
-    MAX_AUDIO_FILE_SIZE_MB: int = Field(default=1000, env="MAX_AUDIO_FILE_SIZE_MB")
-    MIN_FREE_DISK_SPACE_GB: int = Field(default=1, env="MIN_FREE_DISK_SPACE_GB")
+    TEMP_AUDIO_DIR: Optional[str] = Field(default="/data", env="TEMP_AUDIO_DIR")
+    TEMP_FILE_MAX_AGE_HOURS: Optional[int] = Field(default=24, env="TEMP_FILE_MAX_AGE_HOURS")
+    MAX_AUDIO_FILE_SIZE_MB: Optional[int] = Field(default=1000, env="MAX_AUDIO_FILE_SIZE_MB")
+    MIN_FREE_DISK_SPACE_GB: Optional[int] = Field(default=1, env="MIN_FREE_DISK_SPACE_GB")
 
     class Config:
         env_file = ".env"
