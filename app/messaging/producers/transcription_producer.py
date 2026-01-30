@@ -102,6 +102,7 @@ async def publish_v2(
 
     # Extract segments from transcription_v2
     segments = transcription_v2.get("segments", [])
+    metadata = transcription_v2.get("metadata", {})
 
     message = {
         "metadata": {
@@ -114,7 +115,8 @@ async def publish_v2(
             "platform": platform,
             "id": meeting_id,
             "tenantId": tenant_id,
-            "transcriptions": segments
+            "segments": segments,
+            "metadata": metadata
         }
     }
 
