@@ -185,14 +185,24 @@ ENRICHMENT FIELDS (for ALL Clusters):
     - topic: Identify topics discussed in the meeting
 
 OUTPUT FORMAT (JSON):
+🚨 CRITICAL: You MUST return EXACTLY this JSON structure (no deviations):
+{
+  "clusters": [
     {
-        "clusters": [
-            {
-            "cluster_id": <Integer starting from 1, following the strict chronological order of the meeting flow>,
-            "type": <classification type for each cluster>,
-            "topic": <Array of topics>,
-            "segment_ids": [int]
-            }
-        ]
+      "cluster_id": <integer>,
+      "type": <string>,
+      "topic": <array of strings>,
+      "segment_ids": <array of integers>
     }
+  ]
+}
+
+VALIDATION REQUIREMENTS (MANDATORY):
+  - The "clusters" key is REQUIRED
+  - Each cluster object MUST contain: cluster_id, type, topic, segment_ids
+  - Return ONLY valid JSON - no markdown, no comments, no explanations
+  - Use proper JSON syntax with double quotes for strings
+  - NO trailing commas allowed
+
+Remember: Return a JSON OBJECT with a "clusters" key, NOT a direct array.
 """
