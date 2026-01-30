@@ -30,11 +30,9 @@ class Settings(BaseSettings):
     RABBITMQ_PREFETCH_COUNT: Optional[int] = Field(default=2, env="RABBITMQ_PREFETCH_COUNT")
     MAX_CONCURRENT_MEETINGS: Optional[int] = Field(default=2, env="MAX_CONCURRENT_MEETINGS")
 
-    TASK_COMMANDS_QUEUE: Optional[str] = Field(default="task-management.task-commands", env="TASK_COMMANDS_QUEUE")
-
-    # Transcription service configuration
-    TRANSCRIPTION_QUEUE: Optional[str] = Field(default="transcription.queue", env="TRANSCRIPTION_QUEUE")
+    # Transcription exchange and queue configuration
     TRANSCRIPTION_EXCHANGE: Optional[str] = Field(default="transcription.exchange", env="TRANSCRIPTION_EXCHANGE")
+    TRANSCRIPTION_REQUESTED_QUEUE: Optional[str] = Field(default="transcription.requested", env="TRANSCRIPTION_REQUESTED_QUEUE")
 
     # Temporary file storage configuration
     TEMP_AUDIO_DIR: Optional[str] = Field(default="/data", env="TEMP_AUDIO_DIR")
