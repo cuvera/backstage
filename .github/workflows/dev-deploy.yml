@@ -1,147 +1,95 @@
-name: Dev Build and Deploy
+name: Dev Deployment
 
 on:
   push:
-    branches: [dev]
-  pull_request:
-    branches: [dev]
+    branches: [dev*]
 
 env:
-  PYTHON_VERSION: '3.11'
+  PYTHON_VERSION: "3.11.2"
+  SERVICE_NAME: backstage
 
 jobs:
-  build:
-    runs-on: self-hosted
-    environment: dev
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Log in to Docker registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ secrets.DOCKER_REGISTRY_URL }}
-          username: ${{ secrets.DOCKER_REGISTRY_USERNAME }}
-          password: ${{ secrets.DOCKER_REGISTRY_PASSWORD }}
-
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: |
-            ${{ secrets.DOCKER_REGISTRY_URL }}/backstage:${{ github.sha }}
-
   deploy:
-    needs: build
     runs-on: self-hosted
     environment: dev
-    if: github.ref == 'refs/heads/dev'
-    
+
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-          
+      - uses: actions/checkout@v4
+
       - name: Parse deployment variables
         id: deploy_vars
         run: |
-          # Extract individual variables
           echo "VM_HOST=${{ vars.VM_HOST }}" >> $GITHUB_OUTPUT
           echo "VM_USER=${{ vars.VM_USER }}" >> $GITHUB_OUTPUT
           echo "VM_PORT=${{ vars.VM_PORT }}" >> $GITHUB_OUTPUT
-          
-          # Extract SERVICE_NAME from DEV_ENV
-          SERVICE_NAME=$(echo "${{ vars.DEV_ENV }}" | sed 's/\\r\\n/\n/g' | grep "^SERVICE_NAME=" | cut -d'=' -f2 | tr -d '\r\n' | xargs)
-          echo "SERVICE_NAME=${SERVICE_NAME}" >> $GITHUB_OUTPUT
-          
+          echo "SERVICE_NAME=${{ vars.SERVICE_NAME }}" >> $GITHUB_OUTPUT
+
+      - name: Configure
+        run: |
+          echo "IMAGE_TAG=${{ github.sha }}" >> $GITHUB_ENV
+          echo "${{ secrets.DOCKER_REGISTRY_PASSWORD }}" | docker login ${{ secrets.DOCKER_REGISTRY_URL }} -u ${{ secrets.DOCKER_REGISTRY_USERNAME }} --password-stdin
+
+      - name: Build and push
+        run: |
+          docker build -t ${{ secrets.DOCKER_REGISTRY_URL }}/${{ env.SERVICE_NAME }}:${{ env.IMAGE_TAG }} .
+          docker push ${{ secrets.DOCKER_REGISTRY_URL }}/${{ env.SERVICE_NAME }}:${{ env.IMAGE_TAG }}
+
       - name: Setup SSH
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
-          
+
       - name: Add host to known_hosts
         run: |
           mkdir -p ~/.ssh
           ssh-keyscan -H ${{ steps.deploy_vars.outputs.VM_HOST }} >> ~/.ssh/known_hosts
-          
-      - name: Deploy to dev server
+
+      - name: Deploy
+        id: deploy
         env:
-          SECRETS_CONTEXT: ${{ toJson(secrets) }}
-          VARS_CONTEXT: ${{ toJson(vars) }}
+          VM: ${{ vars.VM_USER }}@${{ vars.VM_HOST }}
+          DEPLOY_PATH: /home/${{ vars.VM_USER }}/deploy/${{ env.SERVICE_NAME }}
         run: |
-          # Create .env file with Docker Compose variables first
           cat > .env << EOF
-          # Docker Compose Configuration
-          DOCKER_IMAGE=${{ secrets.DOCKER_REGISTRY_URL }}/${{ steps.deploy_vars.outputs.SERVICE_NAME }}:${{ github.sha }}
           DOCKER_REGISTRY_URL=${{ secrets.DOCKER_REGISTRY_URL }}
-          SERVICE_NAME=${{ steps.deploy_vars.outputs.SERVICE_NAME }}
-          
+          SERVICE_NAME=${{ env.SERVICE_NAME }}
+          IMAGE_TAG=${{ env.IMAGE_TAG }}
           EOF
-          
-          # Add all secrets (excluding Docker/GitHub specific ones)
-          echo "$SECRETS_CONTEXT" | jq -r 'to_entries[] | select(.key != "SSH_PRIVATE_KEY" and .key != "github_token" and .key != "DOCKER_REGISTRY_URL" and .key != "DOCKER_REGISTRY_USERNAME" and .key != "DOCKER_REGISTRY_PASSWORD") | "\(.key)=\(.value)"' >> .env
-          
-          # Process DEV_ENV variable (handle \r\n properly)
-          echo "$VARS_CONTEXT" | jq -r '.DEV_ENV // ""' | sed 's/\\r\\n/\n/g' | grep -v '^#' | grep -v '^$' | while IFS='=' read -r key value; do
-            if [ -n "$key" ] && [ -n "$value" ]; then
-              echo "${key}=${value}" >> .env
-            fi
-          done
-          
-          # Add other variables except DEV_ENV
-          echo "$VARS_CONTEXT" | jq -r 'to_entries[] | select(.key != "DEV_ENV" and .key != "VM_HOST" and .key != "VM_USER" and .key != "VM_PORT") | "\(.key)=\(.value)"' >> .env
 
-          VM_USER="${{ steps.deploy_vars.outputs.VM_USER }}"
-          VM_HOST="${{ steps.deploy_vars.outputs.VM_HOST }}"
-          SERVICE_NAME="${{ steps.deploy_vars.outputs.SERVICE_NAME }}"
+          ssh $VM "mkdir -p $DEPLOY_PATH"
+          scp docker-compose.yml .env $VM:$DEPLOY_PATH
 
-          # Clean variables to remove carriage returns and whitespace
-          VM_USER=$(echo "$VM_USER" | tr -d '\r\n' | xargs)
-          VM_HOST=$(echo "$VM_HOST" | tr -d '\r\n' | xargs)
-          SERVICE_NAME=$(echo "$SERVICE_NAME" | tr -d '\r\n' | xargs)
+          OLD_CONTAINER=$(ssh $VM "docker-compose -f $DEPLOY_PATH/docker-compose.yml ps -q 2>/dev/null || echo ''")
+          echo "old_container=$OLD_CONTAINER" >> $GITHUB_OUTPUT
 
-          # Create deployment directory
-          ssh "${VM_USER}@${VM_HOST}" "mkdir -p '/home/${VM_USER}/${SERVICE_NAME}' && echo 'Directory created: /home/${VM_USER}/${SERVICE_NAME}' && ls -la /home/${VM_USER}/"
-          
-          # Upload docker-compose.yml and .env
-          scp docker-compose.yml .env "${VM_USER}@${VM_HOST}:/home/${VM_USER}/${SERVICE_NAME}/"
-          
-          # Deploy with docker-compose
-          ssh "${VM_USER}@${VM_HOST}" << ENDSSH
-          cd "/home/${VM_USER}/${SERVICE_NAME}"
-          
-          # Verify we're in the right directory and files exist
-          echo "Current directory: \$(pwd)"
-          echo "Files in directory:"
-          ls -la
-          
-          # Docker registry login
-          echo "${{ secrets.DOCKER_REGISTRY_PASSWORD }}" | docker login ${{ secrets.DOCKER_REGISTRY_URL }} -u ${{ secrets.DOCKER_REGISTRY_USERNAME }} --password-stdin
-          
-          # Deploy with docker-compose
-          docker-compose pull
-          docker-compose down
-          docker-compose up -d
-          
-          # Prune old images to save space
-          docker image prune -f
+          ssh $VM "cd $DEPLOY_PATH && ls -la && cat .env && echo '${{ secrets.DOCKER_REGISTRY_PASSWORD }}' | docker login ${{ secrets.DOCKER_REGISTRY_URL }} -u ${{ secrets.DOCKER_REGISTRY_USERNAME }} --password-stdin && docker-compose --env-file .env pull && docker-compose --env-file .env up -d --force-recreate"
 
-          # Show status
-          docker-compose ps
-          docker-compose logs --tail=20
-          ENDSSH
-          
       - name: Health check
         run: |
-          sleep 15
-          VM_HOST="${{ steps.deploy_vars.outputs.VM_HOST }}"
-          SERVICE_NAME="${{ steps.deploy_vars.outputs.SERVICE_NAME }}"
-          
-          # Clean variables to remove carriage returns and whitespace
-          VM_HOST=$(echo "$VM_HOST" | tr -d '\r\n' | xargs)
-          SERVICE_NAME=$(echo "$SERVICE_NAME" | tr -d '\r\n' | xargs)
-          
-          HEALTH_URL="http://${VM_HOST}:7015/${SERVICE_NAME}/health"
-          echo "Health check URL: $HEALTH_URL"
-          curl -f "$HEALTH_URL" || exit 1
+          for i in $(seq 1 10); do
+            if curl -sf http://${{ vars.VM_HOST }}/${{ env.SERVICE_NAME }}/health > /dev/null; then
+              echo "Health check passed"
+              exit 0
+            fi
+            [ $i -lt 10 ] && sleep 5
+          done
+          echo "Health check failed"
+          exit 1
+
+      - name: Rollback on failure
+        if: failure() && steps.deploy.outputs.old_container != ''
+        env:
+          VM: ${{ vars.VM_USER }}@${{ vars.VM_HOST }}
+          DEPLOY_PATH: /home/${{ vars.VM_USER }}/deploy/${{ env.SERVICE_NAME }}
+          OLD_CONTAINER: ${{ steps.deploy.outputs.old_container }}
+        run: |
+          echo "Rolling back to previous version..."
+          ssh $VM "cd $DEPLOY_PATH && docker-compose down && docker start $OLD_CONTAINER"
+
+      - name: Cleanup old containers
+        if: success()
+        env:
+          VM: ${{ vars.VM_USER }}@${{ vars.VM_HOST }}
+          DEPLOY_PATH: /home/${{ vars.VM_USER }}/deploy/${{ env.SERVICE_NAME }}
+        run: |
+          ssh $VM "cd $DEPLOY_PATH && docker container prune -f"

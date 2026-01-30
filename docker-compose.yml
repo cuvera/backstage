@@ -2,29 +2,35 @@ version: '3.8'
 
 services:
   backstage:
-    image: ${DOCKER_IMAGE}
+    image: ${DOCKER_REGISTRY_URL}/${SERVICE_NAME}:${IMAGE_TAG}
     container_name: ${SERVICE_NAME}
     ports:
       - "7015:7015"
     env_file:
       - .env
-    restart: unless-stopped
+      - ../../env/backstage/.env
+    restart: always
     networks:
       - cuvera-network
     volumes:
       - type: volume
         source: backstage-temp-data
         target: /data
-    # deploy:
-    #   resources:
-    #     limits:
-    #       memory: 2G
-    #       cpus: '0.5'
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        # reservations:
+        #   memory: 512M
+        #   cpus: '0.25'
+
+    security_opt:
+      - no-new-privileges:true
+
+    stop_grace_period: 30s
+    stop_signal: SIGTERM
 
 volumes:
   backstage-temp-data:

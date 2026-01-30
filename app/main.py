@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from dotenv import load_dotenv
 from datetime import datetime
 import logging
 
@@ -13,6 +14,8 @@ from app.core.logging import setup_logging
 from app.db.mongodb import connect_to_mongo, close_mongo_connection
 from app.messaging.consumer import RabbitMQConsumerManager
 from app.messaging.producer import producer
+
+load_dotenv()
 
 consumer_manager = RabbitMQConsumerManager()
 
@@ -68,7 +71,3 @@ async def health():
 @app.exception_handler(HTTPException)
 async def http_exception_handler(_: Request, exc: HTTPException):
     return JSONResponse(status_code=exc.status_code, content={"message": exc.detail})
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
