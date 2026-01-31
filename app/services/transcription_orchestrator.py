@@ -54,7 +54,74 @@ class TranscriptionOrchestrator:
             )
 
         logger.info(f"Temp directory initialized: {temp_dir} ({free_gb:.2f}GB free)")
-    
+
+    async def _cleanup_after_success(
+        self,
+        transcription_id: str,
+        tenant_id: str
+    ) -> None:
+        """
+        Clean up chunks and files after successful transcription.
+
+        Deletes:
+        - MongoDB chunk documents
+        - Downloaded audio file
+        - Generated chunk files
+        - Transcription directory
+
+        Args:
+            transcription_id: The transcription identifier
+            tenant_id: The tenant identifier
+        """
+        cleanup_start = time.time()
+
+        try:
+            # Step 1: Delete chunks from MongoDB
+            from app.repository.transcription_chunk_repository import TranscriptionChunkRepository
+
+            chunk_repo = await TranscriptionChunkRepository.from_default()
+            deleted_count = await chunk_repo.delete_chunks(transcription_id, tenant_id)
+
+            logger.info(
+                f"Cleanup: Deleted {deleted_count} chunks from database | "
+                f"transcription_id={transcription_id} tenant_id={tenant_id}"
+            )
+
+            # Step 2: Delete audio files from disk
+            transcription_dir = Path(settings.TEMP_AUDIO_DIR) / transcription_id
+
+            if transcription_dir.exists():
+                # Count files before deletion for logging
+                file_count = sum(1 for _ in transcription_dir.rglob('*') if _.is_file())
+
+                # Delete entire directory (includes original audio + chunks)
+                await asyncio.to_thread(shutil.rmtree, str(transcription_dir))
+
+                logger.info(
+                    f"Cleanup: Deleted transcription directory with {file_count} files | "
+                    f"path={transcription_dir} transcription_id={transcription_id}"
+                )
+            else:
+                logger.warning(
+                    f"Cleanup: Transcription directory not found | "
+                    f"path={transcription_dir} transcription_id={transcription_id}"
+                )
+
+            cleanup_duration = round((time.time() - cleanup_start) * 1000, 2)
+            logger.info(
+                f"Cleanup completed in {cleanup_duration}ms | "
+                f"transcription_id={transcription_id}"
+            )
+
+        except Exception as e:
+            # Log error but don't fail the transcription
+            # Cleanup failure shouldn't affect the successful transcription result
+            logger.error(
+                f"Cleanup failed | transcription_id={transcription_id} "
+                f"tenant_id={tenant_id} error={e}",
+                exc_info=True
+            )
+
     async def transcribe_audio(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
         Process audio transcription using Gemini 2.5 Flash for unified analysis.
@@ -150,6 +217,16 @@ class TranscriptionOrchestrator:
 
             step_duration_ms = round((time.time() - step_start_time) * 1000, 2)
             logger.info(f"Step 2 completed in {step_duration_ms}ms - transcription_id={transcription_id}")
+
+            ########################################################
+            # Step 3: Cleanup (Database + Files)                  #
+            ########################################################
+            logger.info(f"Step 3: Starting cleanup - transcription_id={transcription_id}")
+
+            await self._cleanup_after_success(
+                transcription_id=transcription_id,
+                tenant_id=tenant_id
+            )
 
             total_duration_ms = round((time.time() - overall_start_time) * 1000, 2)
             logger.info(f"Audio transcription completed successfully in {total_duration_ms}ms - transcription_id={transcription_id}, tenant_id={tenant_id}")
