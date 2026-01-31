@@ -40,8 +40,46 @@ class Settings(BaseSettings):
     MAX_AUDIO_FILE_SIZE_MB: Optional[int] = Field(default=1000, env="MAX_AUDIO_FILE_SIZE_MB")
     MIN_FREE_DISK_SPACE_GB: Optional[int] = Field(default=1, env="MIN_FREE_DISK_SPACE_GB")
 
+    # Multi-tenant configuration
+    TENANT_DATABASE_PREFIX: Optional[str] = Field(default="transcription", env="TENANT_DATABASE_PREFIX")
+    ALLOWED_TENANTS: Optional[str] = Field(default="*", env="ALLOWED_TENANTS")
+    TENANT_VALIDATION_ENABLED: Optional[bool] = Field(default=True, env="TENANT_VALIDATION_ENABLED")
+
     class Config:
         env_file = ".env"
         case_sensitive = True
 
 settings = Settings()
+
+
+def validate_tenant_id(tenant_id: str) -> bool:
+    """
+    Validate tenant ID against allowlist configuration.
+
+    Args:
+        tenant_id: The tenant ID to validate
+
+    Returns:
+        True if tenant is allowed, False otherwise
+
+    Examples:
+        >>> # ALLOWED_TENANTS = "*"
+        >>> validate_tenant_id("any_tenant")
+        True
+
+        >>> # ALLOWED_TENANTS = "tenant_a,tenant_b,tenant_c"
+        >>> validate_tenant_id("tenant_a")
+        True
+        >>> validate_tenant_id("tenant_x")
+        False
+    """
+    if not settings.TENANT_VALIDATION_ENABLED:
+        return True
+
+    allowed = settings.ALLOWED_TENANTS
+    if not allowed or allowed == "*":
+        return True
+
+    # Parse comma-separated list of allowed tenants
+    allowed_list = [t.strip() for t in allowed.split(",") if t.strip()]
+    return tenant_id in allowed_list

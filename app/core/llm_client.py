@@ -90,6 +90,7 @@ class LLMClient:
                 self.gemini_client = AsyncOpenAI(
                     api_key=settings.GEMINI_API_KEY,
                     base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+                    max_retries=0,
                     timeout=settings.LLM_TIMEOUT
                 )
                 logger.info("[LLMClient] Gemini client initialized")
@@ -101,6 +102,7 @@ class LLMClient:
             try:
                 self.openai_client = AsyncOpenAI(
                     api_key=settings.OPENAI_API_KEY,
+                    max_retries=0,
                     timeout=settings.LLM_TIMEOUT
                 )
                 logger.info("[LLMClient] OpenAI client initialized")
@@ -114,6 +116,7 @@ class LLMClient:
                     api_key=settings.AZURE_OPENAI_API_KEY,
                     azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
                     api_version=settings.AZURE_OPENAI_API_VERSION,
+                    max_retries=0,
                     timeout=settings.LLM_TIMEOUT
                 )
                 logger.info("[LLMClient] Azure OpenAI client initialized")

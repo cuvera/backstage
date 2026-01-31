@@ -11,9 +11,11 @@ from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.core.logging import setup_logging
+from app.core.tenant_context import TenantContextError, InvalidTenantError
 from app.db.mongodb import connect_to_mongo, close_mongo_connection
 from app.messaging.consumer import RabbitMQConsumerManager
 from app.messaging.producer import producer
+from app.middleware.tenant_middleware import TenantMiddleware
 
 load_dotenv()
 
@@ -48,6 +50,10 @@ app = FastAPI(
     root_path="/backstage",
 )
 
+# Register tenant middleware BEFORE CORS middleware
+# This ensures tenant context is set before request processing
+app.add_middleware(TenantMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -56,18 +62,41 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.get("/health", summary="Service health")
-async def health():
-    return {"ok": True}
-
 @app.get("/health")
 async def health():
+    """Health check endpoint (bypasses tenant validation)."""
     return {
         "status": "success",
         "message": "Server is running!",
         "timestamp": datetime.now().isoformat(),
     }
 
+# Exception Handlers
+
 @app.exception_handler(HTTPException)
 async def http_exception_handler(_: Request, exc: HTTPException):
     return JSONResponse(status_code=exc.status_code, content={"message": exc.detail})
+
+@app.exception_handler(TenantContextError)
+async def tenant_context_error_handler(_: Request, exc: TenantContextError):
+    """Handle missing tenant context errors."""
+    return JSONResponse(
+        status_code=400,
+        content={
+            "error": "Tenant context error",
+            "message": str(exc),
+            "detail": "Tenant context is required but not set"
+        }
+    )
+
+@app.exception_handler(InvalidTenantError)
+async def invalid_tenant_error_handler(_: Request, exc: InvalidTenantError):
+    """Handle invalid tenant errors."""
+    return JSONResponse(
+        status_code=403,
+        content={
+            "error": "Invalid tenant",
+            "message": str(exc),
+            "detail": "The provided tenant is not authorized"
+        }
+    )
