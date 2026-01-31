@@ -1,5 +1,5 @@
 # Multi-stage build for Python FastAPI app
-FROM python:3.11-slim AS builder
+FROM python:3.11-alpine AS builder
 
 WORKDIR /app
 
@@ -15,17 +15,16 @@ COPY requirements.txt ./
 RUN pip install --user -r requirements.txt
 
 # Production stage
-FROM python:3.11-slim AS production
+FROM python:3.11-alpine AS production
 
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apk add --no-cache \
     curl \
     ffmpeg \
     mediainfo \
-    && rm -rf /var/lib/apt/lists/*
+    ca-certificates
 
-# Create non-root user (Debian/Ubuntu syntax)
-RUN groupadd -r appuser && useradd -r -g appuser appuser
+# Create non-root user (Alpine syntax)
+RUN addgroup -S appuser && adduser -S -G appuser appuser
 
 # Create data directory with proper permissions
 RUN mkdir -p /data && \
@@ -33,7 +32,6 @@ RUN mkdir -p /data && \
     chmod 1777 /data
 
 WORKDIR /app
-
 # Copy installed packages from builder
 COPY --from=builder /root/.local /home/appuser/.local
 

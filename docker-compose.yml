@@ -1,9 +1,7 @@
-version: '3.8'
-
 services:
   backstage:
-    image: ${DOCKER_REGISTRY_URL}/${SERVICE_NAME}:${IMAGE_TAG}
-    container_name: ${SERVICE_NAME}
+    build: .
+    image: backstage:x1
     ports:
       - "7015:7015"
     env_file:
