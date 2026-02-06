@@ -1,7 +1,7 @@
 services:
   backstage:
     build: .
-    image: backstage:x1
+    image: ${DOCKER_REGISTRY_URL}/backstage:${IMAGE_TAG}
     ports:
       - "7015:7015"
     env_file:
