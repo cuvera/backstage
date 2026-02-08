@@ -1,0 +1,94 @@
+name: CD Shadow
+
+on:
+  workflow_dispatch:
+    inputs:
+      rc_tag:
+        description: 'RC image tag to deploy (e.g. rc-1.2.0)'
+        required: true
+        type: string
+
+env:
+  SERVICE_NAME: backstage
+
+concurrency:
+  group: deploy-shadow
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: self-hosted
+    steps:
+      - name: Validate tag format
+        run: |
+          if [[ ! "${{ inputs.rc_tag }}" =~ ^rc- ]]; then
+            echo "FATAL: Tag must start with 'rc-'. Got: ${{ inputs.rc_tag }}"
+            exit 1
+          fi
+
+      - name: Log in to Docker registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.DOCKER_REGISTRY_URL }}
+          username: ${{ secrets.DOCKER_REGISTRY_USERNAME }}
+          password: ${{ secrets.DOCKER_REGISTRY_PASSWORD }}
+
+      - name: Verify RC image exists
+        env:
+          DOCKER_REGISTRY_URL: ${{ secrets.DOCKER_REGISTRY_URL }}
+        run: |
+          DOCKER_CLI_EXPERIMENTAL=enabled docker manifest inspect "${DOCKER_REGISTRY_URL}/${SERVICE_NAME}:${{ inputs.rc_tag }}" > /dev/null 2>&1 \
+            || { echo "FATAL: Image ${SERVICE_NAME}:${{ inputs.rc_tag }} not found in registry."; exit 1; }
+
+          echo "Verified: ${SERVICE_NAME}:${{ inputs.rc_tag }} exists in registry"
+
+  deploy:
+    needs: verify
+    runs-on: self-hosted
+    environment: shadow
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Add host to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ vars.VM_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Deploy to Shadow
+        env:
+          VM: ${{ vars.VM_USER }}@${{ vars.VM_HOST }}
+          DEPLOY_PATH: /home/${{ vars.VM_USER }}/deploy/${{ env.SERVICE_NAME }}
+          DOCKER_REGISTRY_URL: ${{ secrets.DOCKER_REGISTRY_URL }}
+          SERVICE_NAME: ${{ env.SERVICE_NAME }}
+          IMAGE_TAG: ${{ inputs.rc_tag }}
+        run: |
+          ssh $VM "mkdir -p $DEPLOY_PATH"
+
+          envsubst '$DOCKER_REGISTRY_URL $SERVICE_NAME $IMAGE_TAG' < docker-compose.swarm.yml > /tmp/docker-compose.resolved.yml
+          scp /tmp/docker-compose.resolved.yml $VM:$DEPLOY_PATH/docker-compose.swarm.yml
+          rm -f /tmp/docker-compose.resolved.yml
+
+          ssh $VM << ENDSSH
+          set -e
+          echo "${{ secrets.DOCKER_REGISTRY_PASSWORD }}" | docker login ${{ secrets.DOCKER_REGISTRY_URL }} -u ${{ secrets.DOCKER_REGISTRY_USERNAME }} --password-stdin
+          cd $DEPLOY_PATH
+          docker stack deploy -c docker-compose.swarm.yml ${{ env.SERVICE_NAME }} --with-registry-auth --resolve-image always
+          ENDSSH
+
+      - name: Health check
+        run: |
+          for i in $(seq 1 10); do
+            if curl -sf https://${{ vars.VM_HOST }}/${{ env.SERVICE_NAME }}/health > /dev/null; then
+              echo "Shadow health check passed"
+              exit 0
+            fi
+            [ $i -lt 10 ] && sleep 5
+          done
+          echo "Shadow health check failed"
+          exit 1

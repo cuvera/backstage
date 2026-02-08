@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  workflow_dispatch: # disabled — trigger manually if needed
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  ci:
+    runs-on: self-hosted
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build check
+        run: python -m py_compile app/main.py

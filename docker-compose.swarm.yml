@@ -1,0 +1,65 @@
+services:
+  app:
+    image: ${DOCKER_REGISTRY_URL}/${SERVICE_NAME}:${IMAGE_TAG}
+
+    env_file:
+      - ../../env/${SERVICE_NAME}/.env
+
+    ports:
+      - target: 8000
+        published: 7015
+        protocol: tcp
+        mode: ingress
+
+    networks:
+      cuvera-backend:
+        aliases:
+          - ${SERVICE_NAME}
+      cuvera-internal: {}
+
+    volumes:
+      - app-data:/data
+
+    stop_signal: SIGTERM
+    stop_grace_period: 30s
+
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:7015/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+    deploy:
+      replicas: 1
+
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 30s
+
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.0"
+
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: stop-first
+
+      rollback_config:
+        parallelism: 1
+        delay: 10s
+
+volumes:
+  app-data:
+    name: ${SERVICE_NAME}-data
+    driver: local
+
+networks:
+  cuvera-backend:
+    external: true
+  cuvera-internal:
+    external: true
