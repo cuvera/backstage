@@ -162,13 +162,34 @@ class AudioChunker:
             AudioChunkerError: If ffprobe fails
         """
         try:
+            # Try format-level duration first (fastest)
             result = subprocess.run([
                 'ffprobe', '-v', 'error',
                 '-show_entries', 'format=duration',
                 '-of', 'default=noprint_wrappers=1:nokey=1',
                 file_path
             ], capture_output=True, text=True, check=True)
-            return float(result.stdout.strip())
+            duration_str = result.stdout.strip()
+            if duration_str and duration_str != 'N/A':
+                return float(duration_str)
+
+            # Fallback: scan packets for last timestamp (handles WebM files
+            # from browser MediaRecorder that lack duration metadata)
+            logger.warning(f"Format duration unavailable, falling back to packet scanning: {file_path}")
+            result = subprocess.run([
+                'ffprobe', '-v', 'error',
+                '-select_streams', 'a:0',
+                '-show_entries', 'packet=pts_time',
+                '-of', 'csv=p=0',
+                file_path
+            ], capture_output=True, text=True, check=True)
+            lines = [l.strip() for l in result.stdout.strip().splitlines() if l.strip()]
+            if lines:
+                return float(lines[-1])
+
+            raise AudioChunkerError("Could not determine audio duration: no packets found")
+        except AudioChunkerError:
+            raise
         except Exception as e:
             raise AudioChunkerError(f"Failed to get audio duration: {e}")
 
@@ -195,13 +216,34 @@ class AudioChunker:
 
             data = json.loads(result.stdout)
 
-            duration = float(data['format']['duration'])
+            duration_str = data.get('format', {}).get('duration')
+            if duration_str and duration_str != 'N/A':
+                duration = float(duration_str)
+            else:
+                # Fallback: scan packets for last timestamp (handles WebM files
+                # from browser MediaRecorder that lack duration metadata)
+                logger.warning(f"Format duration unavailable, falling back to packet scanning: {file_path}")
+                pkt_result = subprocess.run([
+                    'ffprobe', '-v', 'error',
+                    '-select_streams', 'a:0',
+                    '-show_entries', 'packet=pts_time',
+                    '-of', 'csv=p=0',
+                    file_path
+                ], capture_output=True, text=True, check=True)
+                lines = [l.strip() for l in pkt_result.stdout.strip().splitlines() if l.strip()]
+                if lines:
+                    duration = float(lines[-1])
+                else:
+                    raise AudioChunkerError("Could not determine audio duration: no packets found")
+
             # Get sample rate from first audio stream
             sample_rate = 44100  # Default fallback
             if 'streams' in data and len(data['streams']) > 0:
                 sample_rate = int(data['streams'][0].get('sample_rate', 44100))
 
             return {'duration': duration, 'sample_rate': sample_rate}
+        except AudioChunkerError:
+            raise
         except Exception as e:
             raise AudioChunkerError(f"Failed to get audio metadata: {e}")
 

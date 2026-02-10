@@ -53,13 +53,37 @@ async def _get_audio_metadata_ffprobe(file_path: str) -> dict:
 
         data = json.loads(stdout.decode())
 
-        duration = float(data['format']['duration'])
+        duration_str = data.get('format', {}).get('duration')
+        if duration_str and duration_str != 'N/A':
+            duration = float(duration_str)
+        else:
+            # Fallback: scan packets for last timestamp (handles WebM files
+            # from browser MediaRecorder that lack duration metadata)
+            logger.warning(f"Format duration unavailable, falling back to packet scanning: {file_path}")
+            pkt_process = await asyncio.create_subprocess_exec(
+                'ffprobe', '-v', 'error',
+                '-select_streams', 'a:0',
+                '-show_entries', 'packet=pts_time',
+                '-of', 'csv=p=0',
+                file_path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            pkt_stdout, _ = await pkt_process.communicate()
+            lines = [l.strip() for l in pkt_stdout.decode().strip().splitlines() if l.strip()]
+            if lines:
+                duration = float(lines[-1])
+            else:
+                raise AudioMergerError("Could not determine audio duration: no packets found")
+
         # Get sample rate from first audio stream
         sample_rate = 44100  # Default fallback
         if 'streams' in data and len(data['streams']) > 0:
             sample_rate = int(data['streams'][0].get('sample_rate', 44100))
 
         return {'duration': duration, 'sample_rate': sample_rate}
+    except AudioMergerError:
+        raise
     except Exception as e:
         raise AudioMergerError(f"Failed to get audio metadata: {e}")
 
