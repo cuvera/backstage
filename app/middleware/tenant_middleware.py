@@ -31,6 +31,7 @@ class TenantMiddleware(BaseHTTPMiddleware):
     # Paths that don't require tenant-id header
     EXCLUDED_PATHS = [
         "/health",
+        "/backstage/health",
         "/docs",
     ]
 
@@ -45,6 +46,7 @@ class TenantMiddleware(BaseHTTPMiddleware):
         Returns:
             Response with x-tenant-id header added
         """
+        print(request.url.path)
         # Skip validation for excluded paths (health checks, docs, etc.)
         if request.url.path in self.EXCLUDED_PATHS:
             return await call_next(request)
