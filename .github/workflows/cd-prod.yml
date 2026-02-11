@@ -15,7 +15,7 @@ jobs:
   verify:
     runs-on: self-hosted
     outputs:
-      rc_tag: ${{ steps.resolve.outputs.rc_tag }}
+      image_tag: ${{ steps.resolve.outputs.image_tag }}
 
     steps:
       - name: Log in to Docker registry
@@ -25,25 +25,31 @@ jobs:
           username: ${{ secrets.DOCKER_REGISTRY_USERNAME }}
           password: ${{ secrets.DOCKER_REGISTRY_PASSWORD }}
 
-      - name: Verify RC image exists
+      - name: Verify RC image and retag
         id: resolve
         env:
           DOCKER_REGISTRY_URL: ${{ secrets.DOCKER_REGISTRY_URL }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           RC_TAG="rc-${VERSION}"
-          echo "rc_tag=${RC_TAG}" >> "$GITHUB_OUTPUT"
+          IMAGE_TAG="${GITHUB_REF_NAME}"
+          echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
 
           DOCKER_CLI_EXPERIMENTAL=enabled docker manifest inspect "${DOCKER_REGISTRY_URL}/${SERVICE_NAME}:${RC_TAG}" > /dev/null 2>&1 \
-            || { echo "FATAL: Image ${SERVICE_NAME}:${RC_TAG} not found. Tag rc-${VERSION} on dev and build it first."; exit 1; }
+            || { echo "FATAL: Image ${SERVICE_NAME}:${RC_TAG} not found."; exit 1; }
 
           echo "Verified: ${SERVICE_NAME}:${RC_TAG} exists in registry"
+
+          docker pull "${DOCKER_REGISTRY_URL}/${SERVICE_NAME}:${RC_TAG}"
+          docker tag "${DOCKER_REGISTRY_URL}/${SERVICE_NAME}:${RC_TAG}" "${DOCKER_REGISTRY_URL}/${SERVICE_NAME}:${IMAGE_TAG}"
+          docker push "${DOCKER_REGISTRY_URL}/${SERVICE_NAME}:${IMAGE_TAG}"
+          echo "Retagged: ${SERVICE_NAME}:${RC_TAG} → ${SERVICE_NAME}:${IMAGE_TAG}"
 
   deploy:
     needs: verify
     runs-on: self-hosted
     environment:
-      name: production
+      name: prod
 
     steps:
       - uses: actions/checkout@v4
@@ -64,7 +70,7 @@ jobs:
           DEPLOY_PATH: /home/${{ vars.VM_USER }}/deploy/${{ env.SERVICE_NAME }}
           DOCKER_REGISTRY_URL: ${{ secrets.DOCKER_REGISTRY_URL }}
           SERVICE_NAME: ${{ env.SERVICE_NAME }}
-          IMAGE_TAG: ${{ needs.verify.outputs.rc_tag }}
+          IMAGE_TAG: ${{ needs.verify.outputs.image_tag }}
         run: |
           ssh $VM "mkdir -p $DEPLOY_PATH"
 
