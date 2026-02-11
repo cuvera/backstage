@@ -24,7 +24,7 @@ services:
     stop_grace_period: 30s
 
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/${SERVICE_NAME}/health || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -43,6 +43,9 @@ services:
         limits:
           memory: 1G
           cpus: "1.0"
+        reservations:
+          memory: 512M
+          cpus: "0.50"
 
       update_config:
         parallelism: 1
