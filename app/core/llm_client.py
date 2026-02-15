@@ -160,7 +160,8 @@ class LLMClient:
                 "provider": item.get("provider", "").lower(),
                 "model": item.get("model"),
                 "timeout": item.get("timeout"),
-                "max_tokens": item.get("max_tokens")
+                "max_tokens": item.get("max_tokens"),
+                "retries": item.get("retries")
             }
 
         # String format - auto-detect provider from model name
@@ -169,28 +170,28 @@ class LLMClient:
 
             # Gemini model names
             if item_lower.startswith("gemini-"):
-                return {"provider": "gemini", "model": item, "timeout": None, "max_tokens": None}
+                return {"provider": "gemini", "model": item, "timeout": None, "max_tokens": None, "retries": None}
 
             # OpenAI model names
             elif item_lower.startswith("gpt-") or item_lower.startswith("o1-"):
-                return {"provider": "openai", "model": item, "timeout": None, "max_tokens": None}
+                return {"provider": "openai", "model": item, "timeout": None, "max_tokens": None, "retries": None}
 
             # Anthropic model names (for future support)
             elif item_lower.startswith("claude-"):
-                return {"provider": "anthropic", "model": item, "timeout": None, "max_tokens": None}
+                return {"provider": "anthropic", "model": item, "timeout": None, "max_tokens": None, "retries": None}
 
             # Provider name (uses default model)
             elif item_lower in ["gemini", "openai", "azure", "anthropic"]:
-                return {"provider": item_lower, "model": None, "timeout": None, "max_tokens": None}
+                return {"provider": item_lower, "model": None, "timeout": None, "max_tokens": None, "retries": None}
 
             # Unknown format - treat as provider name
             else:
                 logger.warning(f"[LLMClient] Unknown chain item format: {item}, treating as provider")
-                return {"provider": item_lower, "model": None, "timeout": None, "max_tokens": None}
+                return {"provider": item_lower, "model": None, "timeout": None, "max_tokens": None, "retries": None}
 
         # Fallback
         logger.error(f"[LLMClient] Invalid chain item type: {type(item)}")
-        return {"provider": "gemini", "model": None, "timeout": None, "max_tokens": None}
+        return {"provider": "gemini", "model": None, "timeout": None, "max_tokens": None, "retries": None}
 
     async def chat_completion(
         self,
@@ -211,8 +212,8 @@ class LLMClient:
             provider_chain: Ordered list of providers/models to try (supports mixed formats)
                 - Model names: ["gemini-2.5-flash", "gpt-4o"]
                 - Provider names: ["gemini", "openai", "azure"]
-                - Dicts: [{"provider": "azure", "model": "custom", "timeout": 30, "max_tokens": 4096}]
-                - Mixed: ["gemini-2.5-flash", {"provider": "openai", "model": "gpt-4o-mini", "timeout": 60}]
+                - Dicts: [{"provider": "azure", "model": "custom", "timeout": 30, "max_tokens": 4096, "retries": 1}]
+                - Mixed: ["gemini-2.5-flash", {"provider": "openai", "model": "gpt-4o-mini", "timeout": 60, "retries": 2}]
             model: Global model override (overrides chain-specified models)
             temperature: Sampling temperature
             max_tokens: Global max tokens override (overrides chain-specified max_tokens, defaults to 65000)
@@ -241,11 +242,13 @@ class LLMClient:
             chain_model = chain_item["model"]
             chain_timeout = chain_item.get("timeout")
             chain_max_tokens = chain_item.get("max_tokens")
+            chain_retries = chain_item.get("retries")
 
             # Use global overrides if provided, otherwise use chain values, then defaults
             effective_model = model or chain_model
             effective_timeout = timeout or chain_timeout or self.timeout
             effective_max_tokens = max_tokens or chain_max_tokens or 65000
+            effective_retries = chain_retries or self.max_retries
 
             try:
                 response = await self._try_provider(
@@ -255,6 +258,7 @@ class LLMClient:
                     temperature=temperature,
                     max_tokens=effective_max_tokens,
                     timeout=effective_timeout,
+                    retries=effective_retries,
                     response_format=response_format,
                     **kwargs
                 )
@@ -287,6 +291,7 @@ class LLMClient:
         temperature: float,
         max_tokens: int,
         timeout: float,
+        retries: int,
         response_format: Optional[Dict],
         **kwargs
     ) -> str:
@@ -300,6 +305,7 @@ class LLMClient:
             temperature: Temperature
             max_tokens: Max tokens
             timeout: Request timeout in seconds
+            retries: Number of retry attempts for this provider
             response_format: Response format
             **kwargs: Additional params
 
@@ -316,7 +322,7 @@ class LLMClient:
             raise Exception(f"Provider {provider} not configured or unavailable")
 
         # Retry with exponential backoff
-        for attempt in range(self.max_retries):
+        for attempt in range(retries):
             try:
                 # Build request params
                 request_params = {
@@ -334,7 +340,7 @@ class LLMClient:
 
                 # Log call parameters before making the request
                 logger.info(
-                    f"[LLMClient] Calling {provider} API (attempt {attempt + 1}/{self.max_retries}): "
+                    f"[LLMClient] Calling {provider} API (attempt {attempt + 1}/{retries}): "
                     f"model={model_name}, temperature={temperature}, max_tokens={max_tokens}, "
                     f"timeout={timeout}s, messages={len(messages)}"
                 )
@@ -346,7 +352,7 @@ class LLMClient:
                 return response.choices[0].message.content
 
             except Exception as e:
-                if attempt < self.max_retries - 1:
+                if attempt < retries - 1:
                     # Exponential backoff
                     wait_time = 2 ** attempt
                     logger.warning(
@@ -397,8 +403,9 @@ class LLMClient:
 
     def _default_provider_chain(self):
         return [
-          {"provider": "gemini", "model": "gemini-3-flash-preview", "timeout": 90, "max_tokens": 24000},
-          {"provider": "gemini", "model": "gemini-2.5-pro", "max_tokens": 65000},
+          {"provider": "gemini", "model": "gemini-3-flash-preview", "timeout": 120, "max_tokens": 24000, "retries": 1},
+          {"provider": "gemini", "model": "gemini-3-flash-preview", "timeout": 240, "max_tokens": 48000, "retries": 1},
+          {"provider": "gemini", "model": "gemini-2.5-pro", "max_tokens": 65000, "retries": 1},
       ]
 
 # Singleton instance
