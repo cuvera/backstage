@@ -9,7 +9,9 @@ class Settings(BaseSettings):
     MONGODB_URL: Optional[str] = Field(default="mongodb://localhost:27017", env="MONGODB_URL")
     DATABASE_NAME: Optional[str] = Field(default="cognitive", env="DATABASE_NAME")
     
-    LLM_FALLBACK_CHAIN: Optional[str] = Field(default="gemini-2.5-pro,gemini-3.0-flash-preview,gpt-4.1", env="LLM_FALLBACK_CHAIN")
+    # It overrides the default fallback chain defined in llm_client.py
+    # gemini-2.5-pro,gemini-3.0-flash-preview,gpt-4.1
+    LLM_FALLBACK_CHAIN: Optional[str] = Field(default=None, env="LLM_FALLBACK_CHAIN")
     LLM_TIMEOUT: Optional[float] = Field(default=600, env="LLM_TIMEOUT")
     LLM_MAX_RETRIES: Optional[int] = Field(default=3, env="LLM_MAX_RETRIES")
 

@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any, Dict, List, Optional
 
 from openai import AsyncOpenAI, AsyncAzureOpenAI
@@ -72,10 +73,11 @@ class LLMClient:
         # Initialize clients based on available credentials
         self._initialize_clients()
 
-        # Default provider chain from config (normalized to dict format)
-        self.default_chain = self._parse_fallback_chain(
-            settings.LLM_FALLBACK_CHAIN
-        )
+        # Default provider chain from config or hardcoded fallback
+        if settings.LLM_FALLBACK_CHAIN:
+            self.default_chain = self._parse_fallback_chain(settings.LLM_FALLBACK_CHAIN)
+        else:
+            self.default_chain = self._default_provider_chain()
 
         # Timeout and retry settings
         self.timeout = settings.LLM_TIMEOUT
@@ -93,9 +95,9 @@ class LLMClient:
                     max_retries=0,
                     timeout=settings.LLM_TIMEOUT
                 )
-                logger.info("[LLMClient] Gemini client initialized")
+                logger.info("Gemini client initialized")
             except Exception as e:
-                logger.warning(f"[LLMClient] Failed to initialize Gemini client: {e}")
+                logger.warning(f"Failed to init Gemini client: {e}")
 
         # OpenAI client
         if settings.OPENAI_API_KEY:
@@ -105,9 +107,9 @@ class LLMClient:
                     max_retries=0,
                     timeout=settings.LLM_TIMEOUT
                 )
-                logger.info("[LLMClient] OpenAI client initialized")
+                logger.info("OpenAI client initialized")
             except Exception as e:
-                logger.warning(f"[LLMClient] Failed to initialize OpenAI client: {e}")
+                logger.warning(f"Failed to init OpenAI client: {e}")
 
         # Azure OpenAI client
         if settings.AZURE_OPENAI_API_KEY and settings.AZURE_OPENAI_ENDPOINT:
@@ -119,9 +121,9 @@ class LLMClient:
                     max_retries=0,
                     timeout=settings.LLM_TIMEOUT
                 )
-                logger.info("[LLMClient] Azure OpenAI client initialized")
+                logger.info("Azure client initialized")
             except Exception as e:
-                logger.warning(f"[LLMClient] Failed to initialize Azure client: {e}")
+                logger.warning(f"Failed to init Azure client: {e}")
 
     def _parse_fallback_chain(self, chain_str: str) -> List[Dict[str, Optional[str]]]:
         """
@@ -186,11 +188,11 @@ class LLMClient:
 
             # Unknown format - treat as provider name
             else:
-                logger.warning(f"[LLMClient] Unknown chain item format: {item}, treating as provider")
+                logger.warning(f"Unknown chain item '{item}', treating as provider")
                 return {"provider": item_lower, "model": None, "timeout": None, "max_tokens": None, "retries": None}
 
         # Fallback
-        logger.error(f"[LLMClient] Invalid chain item type: {type(item)}")
+        logger.error(f"Invalid chain item type: {type(item)}")
         return {"provider": "gemini", "model": None, "timeout": None, "max_tokens": None, "retries": None}
 
     async def chat_completion(
@@ -233,9 +235,11 @@ class LLMClient:
         else:
             normalized_chain = self.default_chain
 
-        logger.info(f"[LLMClient] Starting chat completion with chain: {normalized_chain}")
+        chain_summary = [f"{c['provider']}:{c['model'] or 'default'}" for c in normalized_chain]
+        logger.info(f"Chat completion | chain={chain_summary}")
 
         last_exception = None
+        overall_start = time.time()
 
         for chain_item in normalized_chain:
             provider = chain_item["provider"]
@@ -263,25 +267,22 @@ class LLMClient:
                     **kwargs
                 )
 
+                duration_ms = round((time.time() - overall_start) * 1000, 2)
                 logger.info(
-                    f"[LLMClient] Successfully completed with provider: {provider}, "
-                    f"model: {effective_model or 'default'}, "
-                    f"timeout: {effective_timeout}s, max_tokens: {effective_max_tokens}"
+                    f"Chat completion done | provider={provider} model={effective_model or 'default'} "
+                    f"duration={duration_ms}ms"
                 )
                 return response
 
             except Exception as e:
                 last_exception = e
-                logger.warning(
-                    f"[LLMClient] Provider {provider} (model: {effective_model or 'default'}) failed: {e}. "
-                    f"Falling back to next in chain..."
-                )
+                logger.warning(f"{provider}:{effective_model or 'default'} failed: {e}, falling back")
                 continue
 
         # All providers failed
-        error_msg = f"All providers in chain failed"
-        logger.error(f"[LLMClient] {error_msg}. Last error: {last_exception}")
-        raise Exception(error_msg) from last_exception
+        duration_ms = round((time.time() - overall_start) * 1000, 2)
+        logger.error(f"All providers failed after {duration_ms}ms | last_error={last_exception}")
+        raise Exception("All providers in chain failed") from last_exception
 
     async def _try_provider(
         self,
@@ -338,26 +339,23 @@ class LLMClient:
                 if response_format and provider in ["gemini", "openai"]:
                     request_params["response_format"] = response_format
 
-                # Log call parameters before making the request
                 logger.info(
-                    f"[LLMClient] Calling {provider} API (attempt {attempt + 1}/{retries}): "
-                    f"model={model_name}, temperature={temperature}, max_tokens={max_tokens}, "
-                    f"timeout={timeout}s, messages={len(messages)}"
+                    f"Calling {provider} | model={model_name} attempt={attempt + 1}/{retries} "
+                    f"timeout={timeout}s max_tokens={max_tokens}"
                 )
 
-                # Make API call
+                call_start = time.time()
                 response = await client.chat.completions.create(**request_params)
+                call_ms = round((time.time() - call_start) * 1000, 2)
 
-                # Extract text content
+                logger.info(f"{provider}:{model_name} responded in {call_ms}ms")
                 return response.choices[0].message.content
 
             except Exception as e:
                 if attempt < retries - 1:
-                    # Exponential backoff
                     wait_time = 2 ** attempt
                     logger.warning(
-                        f"[LLMClient] Attempt {attempt + 1} failed for {provider}: {e}. "
-                        f"Retrying in {wait_time}s..."
+                        f"{provider} attempt {attempt + 1} failed: {e}, retrying in {wait_time}s"
                     )
                     await asyncio.sleep(wait_time)
                 else:
@@ -398,14 +396,14 @@ class LLMClient:
             )
 
         else:
-            logger.warning(f"[LLMClient] Unknown provider: {provider}")
+            logger.warning(f"Unknown provider: {provider}")
             return (None, "")
 
     def _default_provider_chain(self):
         return [
-          {"provider": "gemini", "model": "gemini-3-flash-preview", "timeout": 120, "max_tokens": 24000, "retries": 1},
-          {"provider": "gemini", "model": "gemini-3-flash-preview", "timeout": 240, "max_tokens": 48000, "retries": 1},
-          {"provider": "gemini", "model": "gemini-2.5-pro", "max_tokens": 65000, "retries": 1},
+          {"provider": "gemini", "model": "gemini-2.5-flash", "timeout": 120, "max_tokens": 24000, "retries": 1},
+          {"provider": "gemini", "model": "gemini-3-flash-preview", "timeout": 180, "max_tokens": 48000, "retries": 1},
+          {"provider": "gemini", "model": "gemini-2.5-pro", "retries": 2},
       ]
 
 # Singleton instance
