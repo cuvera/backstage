@@ -34,23 +34,25 @@ class TranscriptionOrchestrator:
     """Main service for orchestrating audio transcription pipeline."""
 
     def __init__(self):
-        self._ensure_temp_directory()
+        self._temp_dir_initialized = False
 
-    def _ensure_temp_directory(self) -> None:
+    async def _ensure_temp_directory(self) -> None:
         """Ensure temp directory exists and has sufficient space."""
+        if self._temp_dir_initialized:
+            return
+
         temp_dir = Path(settings.TEMP_AUDIO_DIR)
 
-        # Create directory if it doesn't exist
-        temp_dir.mkdir(parents=True, exist_ok=True)
+        await asyncio.to_thread(temp_dir.mkdir, parents=True, exist_ok=True)
 
-        # Check available disk space
-        stat = shutil.disk_usage(temp_dir)
+        stat = await asyncio.to_thread(shutil.disk_usage, temp_dir)
         free_gb = stat.free / (1024 ** 3)
 
         if free_gb < settings.MIN_FREE_DISK_SPACE_GB:
             logger.warning(f"Low disk space: {free_gb:.2f}GB free (min {settings.MIN_FREE_DISK_SPACE_GB}GB)")
 
         logger.info(f"Temp dir ready | path={temp_dir} free={free_gb:.2f}GB")
+        self._temp_dir_initialized = True
 
     async def _cleanup_after_success(
         self,
@@ -124,6 +126,8 @@ class TranscriptionOrchestrator:
         logger.info(f"Starting transcription | id={transcription_id} tenant={tenant_id}")
 
         overall_start_time = time.time()
+
+        await self._ensure_temp_directory()
 
         # Ensure RabbitMQ producer is connected
         from app.messaging.producer import producer

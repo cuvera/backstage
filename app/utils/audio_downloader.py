@@ -3,6 +3,7 @@ Audio downloader utility
 Downloads audio files from URLs using httpx
 """
 
+import asyncio
 import logging
 import os
 import time
@@ -43,7 +44,7 @@ async def download_audio(
     if output_dir is None:
         output_dir = get_base_dir()
     else:
-        os.makedirs(output_dir, exist_ok=True)
+        await asyncio.to_thread(os.makedirs, output_dir, exist_ok=True)
 
     logger.info(f"Downloading audio | url={audio_url[:80]}...")
 
@@ -61,7 +62,7 @@ async def download_audio(
                     await f.write(chunk)
 
     # Get file metadata
-    file_size = os.path.getsize(local_path)
+    file_size = await asyncio.to_thread(os.path.getsize, local_path)
     mime_type = _get_mime_type(local_path)
     download_time_ms = (time.time() - start_time) * 1000
 

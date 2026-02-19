@@ -61,13 +61,13 @@ class RabbitMQConsumerManager:
                     logger.info(f"Binding queue {queue_name} to exchange {exchange_name} with routing key: {routing_key}")
                     await queue.bind(exchange, routing_key=routing_key)
 
-            logger.info(f"Successfully connected and consuming from queue: {queue_name}")
-            async with queue.iterator() as queue_iter:
-                async for message in queue_iter:
-                    logger.debug(f"Received message on queue: {queue_name}")
-                    await handler(message)
+            logger.info(f"Consuming from queue: {queue_name} | prefetch={settings.RABBITMQ_PREFETCH_COUNT}")
+            await queue.consume(handler)
+
+            # Keep consumer alive until cancelled
+            await asyncio.Future()
         except asyncio.CancelledError:
-            logger.info(f"Consumer for queue {queue_name} cancelled (normal shutdown)")
+            logger.info(f"Consumer for queue {queue_name} cancelled")
             raise
         except Exception as e:
             if "Channel closed by RPC timeout" in str(e) or "ChannelInvalidStateError" in str(e):
