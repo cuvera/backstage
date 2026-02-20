@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Dict, Optional
 
@@ -75,52 +76,34 @@ class TranscriptionV2Service:
         """
         options = options or {}
 
-        logger.info(
-            f"[TranscriptionV2] Starting V2 processing | audio_id={id} tenant={tenant_id} type={type}"
-        )
+        logger.info(f"V2 pipeline starting | id={id} tenant={tenant_id}")
 
         try:
-            # Step 1: Normalization (algorithmic)
-            logger.info(f"[TranscriptionV2] Step 1: Normalization")
-            normalized_transcription = self.normalization_processor.normalize(
+            # Step 1: Normalization
+            normalized_transcription = await asyncio.to_thread(
+                self.normalization_processor.normalize,
                 v1_transcription,
                 options.get("normalization", {})
             )
-
             normalization_stats = normalized_transcription.get("metadata", {})
-            logger.info(
-                f"[TranscriptionV2] Normalization complete: "
-                f"{normalization_stats.get('normalized_segment_count', 0)} segments"
-            )
+            logger.info(f"Normalized | {normalization_stats.get('normalized_segment_count', 0)} segments | id={id}")
 
             # Step 2: Classification (LLM)
-            logger.info(f"[TranscriptionV2] Step 2: Segment Classification")
             cluster_definitions = await self.classification_processor.classify_segments(
                 normalized_transcription,
                 options.get("classification", {})
             )
-
-            logger.info(
-                f"[TranscriptionV2] Classification complete: "
-                f"{len(cluster_definitions)} clusters"
-            )
+            logger.info(f"Classified | {len(cluster_definitions)} clusters | id={id}")
 
             # Step 3: Build Clusters
-            logger.info(f"[TranscriptionV2] Step 3: Building Clusters")
             segment_classifications = self.cluster_builder.build_clusters(
                 cluster_definitions,
                 normalized_transcription
             )
-
             cluster_stats = segment_classifications.get("metadata", {})
-            logger.info(
-                f"[TranscriptionV2] Cluster building complete: "
-                f"{cluster_stats.get('total_clusters', 0)} clusters"
-            )
+            logger.info(f"Clusters built | {cluster_stats.get('total_clusters', 0)} clusters | id={id}")
 
             # Step 4: Publish to RabbitMQ
-            logger.info(f"[TranscriptionV2] Step 4: Publishing V2 to RabbitMQ")
-
             await publish_v2(
                 meeting_id=id,
                 tenant_id=tenant_id,
@@ -128,30 +111,23 @@ class TranscriptionV2Service:
                 mode=mode,
                 transcription_v2=segment_classifications
             )
-
-            logger.info(f"[TranscriptionV2] Published V2 to RabbitMQ - transcription_id={id}")
-
-            processing_stats = {
-                "normalization": normalization_stats,
-                "classification": {
-                    "total_clusters": cluster_stats.get("total_clusters", 0),
-                    "clusters_by_type": cluster_stats.get("clusters_by_type", {})
-                }
-            }
-
-            logger.info(f"[TranscriptionV2] V2 pipeline completed - transcription_id={id}")
+            logger.info(f"V2 published | id={id}")
 
             return {
                 "status": "completed",
                 "transcription_v2": segment_classifications,
                 "segments": segment_classifications,
-                "processing_stats": processing_stats
+                "processing_stats": {
+                    "normalization": normalization_stats,
+                    "classification": {
+                        "total_clusters": cluster_stats.get("total_clusters", 0),
+                        "clusters_by_type": cluster_stats.get("clusters_by_type", {})
+                    }
+                }
             }
 
         except Exception as e:
-            logger.exception(
-                f"[TranscriptionV2] V2 processing failed | transcription_id={id}: {e}"
-            )
+            logger.exception(f"V2 failed | id={id}: {e}")
             raise
 
 # Singleton instance

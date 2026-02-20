@@ -3,12 +3,14 @@ Audio downloader utility
 Downloads audio files from URLs using httpx
 """
 
+import asyncio
 import logging
 import os
 import time
 from pathlib import Path
 from typing import Dict, Any
 import httpx
+import aiofiles
 
 from app.utils.audio_chunker import get_base_dir
 
@@ -42,9 +44,9 @@ async def download_audio(
     if output_dir is None:
         output_dir = get_base_dir()
     else:
-        os.makedirs(output_dir, exist_ok=True)
+        await asyncio.to_thread(os.makedirs, output_dir, exist_ok=True)
 
-    logger.info(f"[AudioDownloader] Downloading audio from: {audio_url[:100]}...")
+    logger.info(f"Downloading audio | url={audio_url[:80]}...")
 
     # Extract filename from URL (without query params)
     filename = Path(audio_url.split("?")[0]).name or f"audio_{int(time.time())}.m4a"
@@ -55,19 +57,16 @@ async def download_audio(
         async with client.stream("GET", audio_url) as response:
             response.raise_for_status()
 
-            with open(local_path, "wb") as f:
+            async with aiofiles.open(local_path, "wb") as f:
                 async for chunk in response.aiter_bytes(chunk_size=8192):
-                    f.write(chunk)
+                    await f.write(chunk)
 
     # Get file metadata
-    file_size = os.path.getsize(local_path)
+    file_size = await asyncio.to_thread(os.path.getsize, local_path)
     mime_type = _get_mime_type(local_path)
     download_time_ms = (time.time() - start_time) * 1000
 
-    logger.info(
-        f"[AudioDownloader] Downloaded successfully | "
-        f"path={local_path} size={file_size} bytes time={download_time_ms:.2f}ms"
-    )
+    logger.info(f"Download complete | size={file_size}B time={download_time_ms:.0f}ms")
 
     return {
         "local_path": local_path,

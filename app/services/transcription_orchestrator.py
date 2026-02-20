@@ -34,26 +34,25 @@ class TranscriptionOrchestrator:
     """Main service for orchestrating audio transcription pipeline."""
 
     def __init__(self):
-        self._ensure_temp_directory()
+        self._temp_dir_initialized = False
 
-    def _ensure_temp_directory(self) -> None:
+    async def _ensure_temp_directory(self) -> None:
         """Ensure temp directory exists and has sufficient space."""
+        if self._temp_dir_initialized:
+            return
+
         temp_dir = Path(settings.TEMP_AUDIO_DIR)
 
-        # Create directory if it doesn't exist
-        temp_dir.mkdir(parents=True, exist_ok=True)
+        await asyncio.to_thread(temp_dir.mkdir, parents=True, exist_ok=True)
 
-        # Check available disk space
-        stat = shutil.disk_usage(temp_dir)
+        stat = await asyncio.to_thread(shutil.disk_usage, temp_dir)
         free_gb = stat.free / (1024 ** 3)
 
         if free_gb < settings.MIN_FREE_DISK_SPACE_GB:
-            logger.warning(
-                f"Low disk space in temp directory: {free_gb:.2f}GB free, "
-                f"minimum required: {settings.MIN_FREE_DISK_SPACE_GB}GB"
-            )
+            logger.warning(f"Low disk space: {free_gb:.2f}GB free (min {settings.MIN_FREE_DISK_SPACE_GB}GB)")
 
-        logger.info(f"Temp directory initialized: {temp_dir} ({free_gb:.2f}GB free)")
+        logger.info(f"Temp dir ready | path={temp_dir} free={free_gb:.2f}GB")
+        self._temp_dir_initialized = True
 
     async def _cleanup_after_success(
         self,
@@ -82,45 +81,22 @@ class TranscriptionOrchestrator:
             chunk_repo = await TranscriptionChunkRepository.from_default()
             deleted_count = await chunk_repo.delete_chunks(transcription_id, tenant_id)
 
-            logger.info(
-                f"Cleanup: Deleted {deleted_count} chunks from database | "
-                f"transcription_id={transcription_id} tenant_id={tenant_id}"
-            )
+            logger.info(f"Cleanup | deleted {deleted_count} chunks from DB | id={transcription_id}")
 
             # Step 2: Delete audio files from disk
             transcription_dir = Path(settings.TEMP_AUDIO_DIR) / transcription_id
 
-            if transcription_dir.exists():
-                # Count files before deletion for logging
-                file_count = sum(1 for _ in transcription_dir.rglob('*') if _.is_file())
-
-                # Delete entire directory (includes original audio + chunks)
+            if await asyncio.to_thread(transcription_dir.exists):
                 await asyncio.to_thread(shutil.rmtree, str(transcription_dir))
-
-                logger.info(
-                    f"Cleanup: Deleted transcription directory with {file_count} files | "
-                    f"path={transcription_dir} transcription_id={transcription_id}"
-                )
+                logger.info(f"Cleanup | deleted dir {transcription_dir} | id={transcription_id}")
             else:
-                logger.warning(
-                    f"Cleanup: Transcription directory not found | "
-                    f"path={transcription_dir} transcription_id={transcription_id}"
-                )
+                logger.warning(f"Cleanup | dir not found {transcription_dir} | id={transcription_id}")
 
-            cleanup_duration = round((time.time() - cleanup_start) * 1000, 2)
-            logger.info(
-                f"Cleanup completed in {cleanup_duration}ms | "
-                f"transcription_id={transcription_id}"
-            )
+            cleanup_ms = round((time.time() - cleanup_start) * 1000, 2)
+            logger.info(f"Cleanup done in {cleanup_ms}ms | id={transcription_id}")
 
         except Exception as e:
-            # Log error but don't fail the transcription
-            # Cleanup failure shouldn't affect the successful transcription result
-            logger.error(
-                f"Cleanup failed | transcription_id={transcription_id} "
-                f"tenant_id={tenant_id} error={e}",
-                exc_info=True
-            )
+            logger.error(f"Cleanup failed | id={transcription_id} error={e}", exc_info=True)
 
     async def transcribe_audio(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -144,12 +120,14 @@ class TranscriptionOrchestrator:
         speaker_timeframes = payload.get("speakerTimeframes", [])
 
         if not all([transcription_id, tenant_id]):
-            logger.error(f"Missing required fields in payload: transcription_id={transcription_id}, tenant_id={tenant_id}")
+            logger.error(f"Missing required fields | id={transcription_id} tenant={tenant_id}")
             return
 
-        logger.info(f"Starting audio transcription - transcription_id={transcription_id}, tenant_id={tenant_id}")
+        logger.info(f"Starting transcription | id={transcription_id} tenant={tenant_id}")
 
         overall_start_time = time.time()
+
+        await self._ensure_temp_directory()
 
         # Ensure RabbitMQ producer is connected
         from app.messaging.producer import producer
@@ -160,7 +138,6 @@ class TranscriptionOrchestrator:
             # Step 1: Transcription V1 (Download + Process)     #
             ######################################################
             step_start_time = time.time()
-            logger.info(f"Step 1: Starting transcription V1 - transcription_id={transcription_id}")
 
             # Step 1.1: Download audio
             audio_url = payload.get("audioUrl")
@@ -169,10 +146,7 @@ class TranscriptionOrchestrator:
 
             download_result = await download_audio(audio_url, output_dir=get_base_dir(transcription_id))
             local_audio_path = download_result["local_path"]
-            logger.info(
-                f"Step 1.1: Audio downloaded | path={local_audio_path} "
-                f"size={download_result['file_size_bytes']} bytes"
-            )
+            logger.info(f"Audio downloaded | size={download_result['file_size_bytes']}B | id={transcription_id}")
 
             # Step 1.2: Process through V1 pipeline (chunk → transcribe → merge → publish)
             participants = payload.get("participants", [])
@@ -188,13 +162,12 @@ class TranscriptionOrchestrator:
             )
 
             step_duration_ms = round((time.time() - step_start_time) * 1000, 2)
-            logger.info(f"Step 1 completed in {step_duration_ms}ms - transcription_id={transcription_id}")
+            logger.info(f"V1 done in {step_duration_ms}ms | id={transcription_id}")
 
             ########################################################
             # Step 2: Transcription V2 (Transform + Process + Publish) #
             ########################################################
             step_start_time = time.time()
-            logger.info(f"Step 2: Starting transcription V2 - transcription_id={transcription_id}")
 
             # Build transcription dict for V2 processing
             transcription = {
@@ -216,37 +189,28 @@ class TranscriptionOrchestrator:
             )
 
             step_duration_ms = round((time.time() - step_start_time) * 1000, 2)
-            logger.info(f"Step 2 completed in {step_duration_ms}ms - transcription_id={transcription_id}")
+            logger.info(f"V2 done in {step_duration_ms}ms | id={transcription_id}")
 
-            ########################################################
-            # Step 3: Cleanup (Database + Files)                  #
-            ########################################################
-            logger.info(f"Step 3: Starting cleanup - transcription_id={transcription_id}")
-
-            await self._cleanup_after_success(
+            asyncio.create_task(self._cleanup_after_success(
                 transcription_id=transcription_id,
                 tenant_id=tenant_id
-            )
+            ))
 
             total_duration_ms = round((time.time() - overall_start_time) * 1000, 2)
-            logger.info(f"Audio transcription completed successfully in {total_duration_ms}ms - transcription_id={transcription_id}, tenant_id={tenant_id}")
+            logger.info(f"Transcription complete in {total_duration_ms}ms | id={transcription_id}")
             return True
 
         except Exception as e:
-            logger.error(f"Audio transcription failed - transcription_id={transcription_id}, tenant_id={tenant_id}: {str(e)}", exc_info=True)
+            logger.error(f"Transcription failed | id={transcription_id}: {e}", exc_info=True)
 
-            # Publish failure status to RabbitMQ
             try:
-                # Use mode if already set, otherwise determine from payload
                 failure_mode = mode if mode else ("online" if speaker_timeframes else "offline")
-
                 await publish_status_failure(
                     meeting_id=transcription_id,
                     tenant_id=tenant_id,
                     platform=platform,
                     mode=failure_mode
                 )
-                logger.info(f"Published failure status to RabbitMQ - transcription_id={transcription_id}")
             except Exception as publish_error:
                 logger.error(f"Failed to publish failure status: {publish_error}")
 

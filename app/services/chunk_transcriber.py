@@ -50,7 +50,7 @@ class ChunkTranscriber:
         """
         self.semaphore = asyncio.Semaphore(max_concurrent)
         self.max_concurrent = max_concurrent
-        logger.info(f"[ChunkTranscriber] Initialized with max {max_concurrent} concurrent")
+        logger.info(f"ChunkTranscriber initialized | max_concurrent={max_concurrent}")
 
     async def transcribe_chunks(
         self,
@@ -74,10 +74,7 @@ class ChunkTranscriber:
         Returns:
             List of ChunkTranscriptionResult objects
         """
-        logger.info(
-            f"[ChunkTranscriber] Starting transcription | "
-            f"chunks={len(chunks)} participants={len(participants)}"
-        )
+        logger.info(f"Transcribing | chunks={len(chunks)} participants={len(participants)}")
 
         # Initialize repository
         chunk_repo = None
@@ -95,10 +92,7 @@ class ChunkTranscriber:
                 completed_ids = {c["chunk_id"] for c in existing_chunks}
                 chunks_to_process = [c for c in chunks if c.get("chunk_id") not in completed_ids]
 
-                logger.info(
-                    f"[ChunkTranscriber] Found {len(existing_chunks)} completed chunks, "
-                    f"processing {len(chunks_to_process)} remaining"
-                )
+                logger.info(f"Resuming | {len(existing_chunks)} done, {len(chunks_to_process)} remaining")
 
         # Convert existing to results
         results = []
@@ -122,7 +116,7 @@ class ChunkTranscriber:
             )
             results.extend(new_results)
 
-        logger.info(f"[ChunkTranscriber] Completed transcription of {len(results)} chunks")
+        logger.info(f"All chunks done | total={len(results)}")
         return results
 
     async def _transcribe_chunks_parallel(
@@ -199,15 +193,15 @@ class ChunkTranscriber:
                     chunk_info=chunk
                 )
             except Exception as e:
-                logger.warning(f"[ChunkTranscriber] Failed to mark chunk {chunk_id} as processing: {e}")
+                logger.warning(f"Failed to mark chunk {chunk_id} as processing: {e}")
 
         try:
             # Transcribe with semaphore (retry + fallback handled by llm_client)
             async with self.semaphore:
                 # 1. Read audio file and convert to base64
-                with open(chunk["file_path"], "rb") as audio_file:
-                    audio_bytes = audio_file.read()
-                    base64_audio = base64.b64encode(audio_bytes).decode("utf-8")
+                base64_audio = await asyncio.to_thread(
+                    self._read_and_encode_audio, chunk["file_path"]
+                )
 
                 # 2. Build multimodal message
                 messages = [
@@ -226,7 +220,7 @@ class ChunkTranscriber:
                     }
                 ]
 
-                # 3. Call llm_client (uses default chain from settings.LLM_FALLBACK_CHAIN)
+                # 3. Call llm_client
                 response_text = await llm_client.chat_completion(
                     messages=messages,
                     temperature=0.0,
@@ -254,10 +248,7 @@ class ChunkTranscriber:
             segments_returned = len(result.get("transcriptions", []))
 
             if segments_sent > 0 and segments_sent != segments_returned:
-                logger.warning(
-                    f"[ChunkTranscriber] Chunk {chunk_id} mismatch: "
-                    f"sent {segments_sent} segments but received {segments_returned} transcriptions"
-                )
+                logger.warning(f"Chunk {chunk_id} segment mismatch: sent={segments_sent} received={segments_returned}")
 
             # Save success
             if chunk_repo:
@@ -271,9 +262,9 @@ class ChunkTranscriber:
                         result=result
                     )
                 except Exception as save_error:
-                    logger.error(f"[ChunkTranscriber] Failed to save chunk {chunk_id}: {save_error}")
+                    logger.error(f"Failed to save chunk {chunk_id}: {save_error}")
 
-            logger.info(f"[ChunkTranscriber] ✅ Chunk {chunk_id} succeeded")
+            logger.info(f"Chunk {chunk_id} succeeded")
 
             return ChunkTranscriptionResult(
                 chunk_id=chunk_id,
@@ -283,7 +274,7 @@ class ChunkTranscriber:
             )
 
         except Exception as e:
-            logger.error(f"[ChunkTranscriber] ❌ Chunk {chunk_id} failed: {e}")
+            logger.error(f"Chunk {chunk_id} failed: {e}")
 
             # Save as failed
             if chunk_repo:
@@ -297,7 +288,7 @@ class ChunkTranscriber:
                         error=str(e)
                     )
                 except Exception as save_error:
-                    logger.error(f"[ChunkTranscriber] Failed to save failed chunk {chunk_id}: {save_error}")
+                    logger.error(f"Failed to save failed chunk {chunk_id}: {save_error}")
 
             return ChunkTranscriptionResult(
                 chunk_id=chunk_id,
@@ -306,6 +297,12 @@ class ChunkTranscriber:
                 chunk_info={"chunk_id": chunk_id, "error": str(e)},
                 error=str(e)
             )
+
+    @staticmethod
+    def _read_and_encode_audio(file_path: str) -> str:
+        with open(file_path, "rb") as audio_file:
+            audio_bytes = audio_file.read()
+        return base64.b64encode(audio_bytes).decode("utf-8")
 
     def _build_prompt(self, mode: str, chunk: Dict, participant_names: List[str]) -> str:
         """

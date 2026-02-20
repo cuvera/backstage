@@ -8,6 +8,7 @@ temp_data/
 *.avi
 *.mov
 
+
 # Python
 __pycache__/
 *.py[cod]
